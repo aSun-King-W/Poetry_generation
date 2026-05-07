@@ -7,6 +7,8 @@ build/
 
 # Data
 data/raw/chinese-poetry/
+data/processed/*.pt
+data/processed/all_pairs.json
 
 # Checkpoints
 checkpoints/*.pt
