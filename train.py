@@ -17,6 +17,47 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
+# Multi-GPU helpers
+# ---------------------------------------------------------------------------
+
+def setup_multi_gpu(model, args):
+    """Wrap model with DataParallel if --multi-gpu is set and multiple GPUs exist."""
+    if args.multi_gpu:
+        n_gpu = torch.cuda.device_count()
+        if n_gpu > 1:
+            model = nn.DataParallel(model)
+            print(f"  Using {n_gpu} GPUs (DataParallel)")
+        elif n_gpu == 1:
+            print("  Only 1 GPU found, --multi-gpu has no effect")
+        else:
+            print("  No GPU found, --multi-gpu has no effect")
+    return model
+
+
+def unwrap_model(model):
+    """Get the underlying model (unwraps DataParallel)."""
+    return model.module if hasattr(model, "module") else model
+
+
+def get_model_state(model):
+    """Get state_dict, unwrapping DataParallel if needed."""
+    return unwrap_model(model).state_dict()
+
+
+def load_state_into_model(model, state_dict):
+    """Load state_dict, handling DataParallel wrapper mismatch."""
+    try:
+        model.load_state_dict(state_dict)
+    except KeyError:
+        # Keys are prefixed with 'module.' from DataParallel save
+        from collections import OrderedDict
+        new_state = OrderedDict()
+        for k, v in state_dict.items():
+            new_state[k.replace("module.", "")] = v
+        model.load_state_dict(new_state)
+
+
+# ---------------------------------------------------------------------------
 # Dataset loader for pre-tokenized .pt files
 # ---------------------------------------------------------------------------
 
@@ -324,7 +365,9 @@ def train_encoder_decoder(args):
         dropout=args.dropout,
     ).to(device)
 
-    n_params = sum(p.numel() for p in model.parameters())
+    model = setup_multi_gpu(model, args)
+
+    n_params = sum(p.numel() for p in unwrap_model(model).parameters())
     print(f"Model parameters: {n_params:,}")
 
     # Optimizer & scheduler
@@ -358,7 +401,7 @@ def train_encoder_decoder(args):
     if args.resume:
         print(f"Resuming from {args.resume}...")
         ckpt = torch.load(args.resume, map_location=device, weights_only=False)
-        model.load_state_dict(ckpt["model_state_dict"])
+        load_state_into_model(model, ckpt["model_state_dict"])
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         start_epoch = ckpt["epoch"] + 1
@@ -420,7 +463,7 @@ def train_encoder_decoder(args):
             ckpt_path = os.path.join(args.checkpoint_dir, "encoder_decoder_best.pt")
             save_dict = {
                 "epoch": epoch,
-                "model_state_dict": model.state_dict(),
+                "model_state_dict": get_model_state(model),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "scheduler_state_dict": scheduler.state_dict(),
                 "valid_loss": valid_loss,
@@ -436,7 +479,7 @@ def train_encoder_decoder(args):
         ckpt_path = os.path.join(args.checkpoint_dir, f"encoder_decoder_epoch{epoch}.pt")
         torch.save({
             "epoch": epoch,
-            "model_state_dict": model.state_dict(),
+            "model_state_dict": get_model_state(model),
             "valid_loss": valid_loss,
         }, ckpt_path)
 
@@ -504,6 +547,8 @@ def main():
                       help="从 checkpoint 文件恢复训练（如 checkpoints/decoder_only_best.pt）")
     dec.add_argument("--num-workers", type=int, default=0)
     dec.add_argument("--log-interval", type=int, default=100)
+    dec.add_argument("--multi-gpu", action="store_true",
+                      help="使用所有可用 GPU 训练")
 
     # Encoder-Decoder subcommand
     encdec = subparsers.add_parser("encoder-decoder")
@@ -530,6 +575,8 @@ def main():
                         help="从 checkpoint 恢复训练（如 checkpoints/encoder_decoder_best.pt）")
     encdec.add_argument("--num-workers", type=int, default=0)
     encdec.add_argument("--log-interval", type=int, default=100)
+    encdec.add_argument("--multi-gpu", action="store_true",
+                        help="使用所有可用 GPU 训练")
 
     args = parser.parse_args()
 
