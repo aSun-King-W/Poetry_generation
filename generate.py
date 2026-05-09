@@ -42,10 +42,17 @@ def encode_input(upper_text, char2id, sep_id=4, max_len=32):
     return torch.tensor(ids, dtype=torch.long)
 
 
-def decode_output(token_ids, id2char, eos_id=3, pad_id=0, sep_id=4):
-    """Convert generated token IDs back to text, stopping at EOS."""
+def decode_output(token_ids, id2char, eos_id=3, pad_id=0, sep_id=4,
+                  skip_first_n=0):
+    """将 token ID 序列解码为文本，遇到 EOS 停止。
+
+    Args:
+        skip_first_n: 跳过前 N 个 token（输入部分），只解码模型新生成的内容。
+    """
     chars = []
-    for tid in token_ids:
+    for i, tid in enumerate(token_ids):
+        if i < skip_first_n:
+            continue
         tid = tid.item() if torch.is_tensor(tid) else tid
         if tid == eos_id:
             break
@@ -57,38 +64,38 @@ def decode_output(token_ids, id2char, eos_id=3, pad_id=0, sep_id=4):
 
 @torch.no_grad()
 def generate_greedy(model, input_ids, max_new_tokens=20, eos_id=3, device="cpu"):
-    """Greedy decoding: pick the highest-probability token at each step."""
+    """贪心解码：每步选概率最高的 token"""
     input_ids = input_ids.to(device)
     seq = model.generate(
         input_ids, max_new_tokens=max_new_tokens,
         temperature=1.0, do_sample=False, eos_id=eos_id,
     )
-    return seq[0]
+    return seq[0], len(input_ids)
 
 
 @torch.no_grad()
 def generate_beam(model, input_ids, beam_size=5, max_new_tokens=20,
                   eos_id=3, device="cpu"):
-    """Beam search: track top-k candidate sequences."""
+    """集束搜索：维护 top-k 条候选路径"""
     input_ids = input_ids.to(device)
     seq = model.generate_beam(
         input_ids, beam_size=beam_size,
         max_new_tokens=max_new_tokens, eos_id=eos_id,
     )
-    return seq
+    return seq, len(input_ids)
 
 
 @torch.no_grad()
 def generate_sample(model, input_ids, temperature=0.8, top_k=None,
                     max_new_tokens=20, eos_id=3, device="cpu"):
-    """Temperature sampling: sample from the token distribution."""
+    """温度采样：从概率分布中随机抽取"""
     input_ids = input_ids.to(device)
     seq = model.generate(
         input_ids, max_new_tokens=max_new_tokens,
         temperature=temperature, do_sample=True,
         top_k=top_k, eos_id=eos_id,
     )
-    return seq[0]
+    return seq[0], len(input_ids)
 
 
 def main():
@@ -135,17 +142,17 @@ def main():
         print(f"\n上句: {upper}")
 
         if args.method == "greedy":
-            seq = generate_greedy(model, input_ids, max_new_tokens=args.max_new,
-                                  device=device)
+            seq, in_len = generate_greedy(model, input_ids, max_new_tokens=args.max_new,
+                                          device=device)
         elif args.method == "beam":
-            seq = generate_beam(model, input_ids, beam_size=args.beam_size,
-                                max_new_tokens=args.max_new, device=device)
+            seq, in_len = generate_beam(model, input_ids, beam_size=args.beam_size,
+                                        max_new_tokens=args.max_new, device=device)
         else:  # sample
-            seq = generate_sample(model, input_ids, temperature=args.temperature,
-                                  top_k=args.top_k, max_new_tokens=args.max_new,
-                                  device=device)
+            seq, in_len = generate_sample(model, input_ids, temperature=args.temperature,
+                                          top_k=args.top_k, max_new_tokens=args.max_new,
+                                          device=device)
 
-        lower = decode_output(seq, id2char)
+        lower = decode_output(seq, id2char, skip_first_n=in_len)
         print(f"下句: {lower}")
 
 

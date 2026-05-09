@@ -83,8 +83,9 @@ def evaluate(model, dataloader, loss_fn, device):
                 shift_logits.view(-1, shift_logits.size(-1)),
                 shift_labels.view(-1),
             )
-        total_loss += loss.item() * shift_labels.numel()
-        total_tokens += (shift_labels != -100).sum().item()
+        n_tokens = (shift_labels != -100).sum().item()
+        total_loss += loss.item() * n_tokens
+        total_tokens += n_tokens
 
     avg_loss = total_loss / max(total_tokens, 1)
     perplexity = math.exp(avg_loss) if avg_loss < 100 else float("inf")
@@ -162,9 +163,24 @@ def train_decoder_only(args):
     # Training loop
     os.makedirs(args.checkpoint_dir, exist_ok=True)
     best_valid_loss = float("inf")
+    start_epoch = 1
     global_step = 0
 
-    for epoch in range(1, args.epochs + 1):
+    # 断点续训：从 checkpoint 恢复模型、优化器、调度器状态
+    if args.resume:
+        print(f"Resuming from {args.resume}...")
+        ckpt = torch.load(args.resume, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model_state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        start_epoch = ckpt["epoch"] + 1
+        best_valid_loss = ckpt.get("valid_loss", float("inf"))
+        print(f"  Restored epoch={ckpt['epoch']}, valid_loss={best_valid_loss:.4f}")
+        # 恢复 AMP scaler 状态（如果保存了）
+        if "scaler_state_dict" in ckpt and scaler is not None:
+            scaler.load_state_dict(ckpt["scaler_state_dict"])
+
+    for epoch in range(start_epoch, args.epochs + 1):
         model.train()
         epoch_loss = 0.0
         epoch_tokens = 0
@@ -219,7 +235,7 @@ def train_decoder_only(args):
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
             ckpt_path = os.path.join(args.checkpoint_dir, "decoder_only_best.pt")
-            torch.save({
+            save_dict = {
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
@@ -227,7 +243,10 @@ def train_decoder_only(args):
                 "valid_loss": valid_loss,
                 "valid_ppl": valid_ppl,
                 "args": vars(args),
-            }, ckpt_path)
+            }
+            if scaler is not None:
+                save_dict["scaler_state_dict"] = scaler.state_dict()
+            torch.save(save_dict, ckpt_path)
             print(f"  → Best model saved to {ckpt_path}")
 
         # Save epoch checkpoint
@@ -272,6 +291,8 @@ def main():
     dec.add_argument("--warmup-steps", type=int, default=2000)
     dec.add_argument("--max-norm", type=float, default=1.0)
     dec.add_argument("--label-smoothing", type=float, default=0.1)
+    dec.add_argument("--resume", type=str, default=None,
+                      help="从 checkpoint 文件恢复训练（如 checkpoints/decoder_only_best.pt）")
     dec.add_argument("--num-workers", type=int, default=0)
     dec.add_argument("--log-interval", type=int, default=100)
 
