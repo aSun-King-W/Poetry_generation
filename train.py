@@ -365,9 +365,7 @@ def train_encoder_decoder(args):
         dropout=args.dropout,
     ).to(device)
 
-    model = setup_multi_gpu(model, args)
-
-    n_params = sum(p.numel() for p in unwrap_model(model).parameters())
+    n_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {n_params:,}")
 
     # Optimizer & scheduler
@@ -397,11 +395,11 @@ def train_encoder_decoder(args):
     start_epoch = 1
     global_step = 0
 
-    # Resume from checkpoint
+    # Resume from checkpoint (BEFORE DataParallel wrapping, to avoid key mismatch)
     if args.resume:
         print(f"Resuming from {args.resume}...")
         ckpt = torch.load(args.resume, map_location=device, weights_only=False)
-        load_state_into_model(model, ckpt["model_state_dict"])
+        model.load_state_dict(ckpt["model_state_dict"])
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         scheduler.load_state_dict(ckpt["scheduler_state_dict"])
         start_epoch = ckpt["epoch"] + 1
@@ -409,6 +407,9 @@ def train_encoder_decoder(args):
         print(f"  Restored epoch={ckpt['epoch']}, valid_loss={best_valid_loss:.4f}")
         if "scaler_state_dict" in ckpt and scaler is not None:
             scaler.load_state_dict(ckpt["scaler_state_dict"])
+
+    # Wrap with DataParallel AFTER loading checkpoint
+    model = setup_multi_gpu(model, args)
 
     for epoch in range(start_epoch, args.epochs + 1):
         model.train()

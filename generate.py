@@ -7,6 +7,7 @@ import torch
 
 from models.decoder_only import DecoderOnlyModel
 from models.encoder_decoder import EncoderDecoderModel
+from utils.tokenizer import SPECIAL_TOKENS
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +101,8 @@ def decode_output(token_ids, id2char, eos_id=3, pad_id=0, sep_id=4,
         if tid == eos_id:
             break
         if tid in (pad_id, sep_id):
+            continue
+        if tid < len(SPECIAL_TOKENS):
             continue
         chars.append(id2char.get(tid, "�"))
     return "".join(chars)
