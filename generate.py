@@ -7,6 +7,7 @@ import torch
 
 from models.decoder_only import DecoderOnlyModel
 from models.encoder_decoder import EncoderDecoderModel
+from models.pretrained import PretrainedPoetryModel
 from utils.tokenizer import SPECIAL_TOKENS
 
 
@@ -67,6 +68,27 @@ def load_encoder_decoder(checkpoint_path, vocab_path, device):
     return model, char2id, id2char
 
 
+def load_pretrained(checkpoint_path, device):
+    """Load a fine-tuned PretrainedPoetryModel from checkpoint."""
+    pretrained = PretrainedPoetryModel.from_pretrained(local_files_only=True)
+
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+
+    # Clean state dict keys (strip 'module.' prefix if saved from DataParallel)
+    state_dict = checkpoint["model_state_dict"]
+    from collections import OrderedDict
+    cleaned = OrderedDict()
+    for k, v in state_dict.items():
+        cleaned[k.replace("module.", "")] = v
+
+    # strict=False ignores attn.bias/masked_bias buffers that differ across
+    # PyTorch/Transformers versions — these are causal-mask constants, not learned
+    pretrained.model.load_state_dict(cleaned, strict=False)
+    pretrained.to(device)
+    pretrained.eval()
+    return pretrained
+
+
 # ---------------------------------------------------------------------------
 # Input encoding
 # ---------------------------------------------------------------------------
@@ -84,6 +106,38 @@ def encode_encoder_decoder(upper_text, char2id, max_len=32):
     ids = [char2id.get(c, 1) for c in upper_text]
     ids = ids[:max_len]
     return torch.tensor(ids, dtype=torch.long)
+
+
+def encode_pretrained(upper_text, tokenizer, device, max_len=64):
+    """Pretrained: '[CLS] u p p e r [SEP]' → input_ids, attention_mask.
+
+    Adds spaces between characters as required by the BertTokenizer.
+    No padding — the unpadded input keeps position encoding consistent
+    with training (where right-padding was used).
+    """
+    text = f"[CLS] {' '.join(list(upper_text))} [SEP]"
+    encoded = tokenizer(
+        text,
+        add_special_tokens=False,
+        return_tensors="pt",
+    )
+    return encoded["input_ids"].to(device), encoded["attention_mask"].to(device)
+
+
+def decode_pretrained(token_ids, tokenizer):
+    """Decode pretrained model output, extracting only the generated part.
+
+    Takes tokens after the last [SEP] (the lower verse the model generated).
+    Strips inter-character spaces added by the BertTokenizer.
+    """
+    ids = token_ids.tolist() if torch.is_tensor(token_ids) else list(token_ids)
+    # Find [SEP] position and take only the generated tokens after it
+    sep_id = tokenizer.sep_token_id
+    if sep_id in ids:
+        last_sep = len(ids) - 1 - ids[::-1].index(sep_id)
+        ids = ids[last_sep + 1:]
+    text = tokenizer.decode(ids, skip_special_tokens=True)
+    return text.replace(" ", "")
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +220,7 @@ def generate_sample(model, input_ids, temperature=0.8, top_k=None,
 
 def main():
     parser = argparse.ArgumentParser(description="Generate poetry with trained model")
-    parser.add_argument("--model", choices=["decoder-only", "encoder-decoder"],
+    parser.add_argument("--model", choices=["decoder-only", "encoder-decoder", "pretrained"],
                         default="decoder-only", help="Model architecture")
     parser.add_argument("--checkpoint", type=str, default=None,
                         help="Checkpoint path (auto-determined by model type if not set)")
@@ -189,8 +243,12 @@ def main():
 
     # Determine checkpoint path
     if args.checkpoint is None:
-        ckpt_name = "decoder_only_best.pt" if args.model == "decoder-only" else "encoder_decoder_best.pt"
-        args.checkpoint = os.path.join("checkpoints", ckpt_name)
+        ckpt_map = {
+            "decoder-only": "decoder_only_best.pt",
+            "encoder-decoder": "encoder_decoder_best.pt",
+            "pretrained": "pretrained_best.pt",
+        }
+        args.checkpoint = os.path.join("checkpoints", ckpt_map[args.model])
 
     if not os.path.exists(args.checkpoint):
         print(f"Checkpoint not found: {args.checkpoint}")
@@ -198,7 +256,10 @@ def main():
         return
 
     # Load model
-    if args.model == "decoder-only":
+    if args.model == "pretrained":
+        model = load_pretrained(args.checkpoint, device)
+        tokenizer = model.tokenizer
+    elif args.model == "decoder-only":
         model, char2id, id2char = load_decoder_only(args.checkpoint, args.vocab, device)
     else:
         model, char2id, id2char = load_encoder_decoder(args.checkpoint, args.vocab, device)
@@ -216,26 +277,54 @@ def main():
     uppers = [args.upper] if args.upper else demo_uppers
 
     for upper in uppers:
-        if args.model == "decoder-only":
-            input_ids = encode_decoder_only(upper, char2id)
+        if args.model == "pretrained":
+            # Pretrained uses HuggingFace generate API with its own tokenizer
+            input_ids, attention_mask = encode_pretrained(upper, tokenizer, device)
+
+            # Build kwargs based on decoding strategy
+            if args.method == "beam":
+                output_ids = model.generate_beam(
+                    input_ids, attention_mask=attention_mask,
+                    beam_size=args.beam_size, max_new_tokens=args.max_new,
+                    eos_id=tokenizer.sep_token_id, pad_id=tokenizer.pad_token_id,
+                )
+            else:
+                output_ids = model.generate(
+                    input_ids, attention_mask=attention_mask,
+                    max_new_tokens=args.max_new,
+                    temperature=args.temperature,
+                    do_sample=(args.method == "sample"),
+                    top_k=args.top_k,
+                    eos_id=tokenizer.sep_token_id,
+                    pad_id=tokenizer.pad_token_id,
+                )
+                output_ids = output_ids[0]  # (batch, seq) → (seq,)
+
+            lower = decode_pretrained(output_ids, tokenizer)
         else:
-            input_ids = encode_encoder_decoder(upper, char2id)
+            # Custom model path
+            if args.model == "decoder-only":
+                input_ids = encode_decoder_only(upper, char2id)
+            else:
+                input_ids = encode_encoder_decoder(upper, char2id)
+
+            print(f"\n上句: {upper}")
+
+            if args.method == "greedy":
+                seq, in_len = generate_greedy(model, input_ids, max_new_tokens=args.max_new,
+                                              device=device, model_type=args.model)
+            elif args.method == "beam":
+                seq, in_len = generate_beam(model, input_ids, beam_size=args.beam_size,
+                                            max_new_tokens=args.max_new, device=device,
+                                            model_type=args.model)
+            else:
+                seq, in_len = generate_sample(model, input_ids, temperature=args.temperature,
+                                              top_k=args.top_k, max_new_tokens=args.max_new,
+                                              device=device, model_type=args.model)
+
+            lower = decode_output(seq, id2char, skip_first_n=in_len)
 
         print(f"\n上句: {upper}")
-
-        if args.method == "greedy":
-            seq, in_len = generate_greedy(model, input_ids, max_new_tokens=args.max_new,
-                                          device=device, model_type=args.model)
-        elif args.method == "beam":
-            seq, in_len = generate_beam(model, input_ids, beam_size=args.beam_size,
-                                        max_new_tokens=args.max_new, device=device,
-                                        model_type=args.model)
-        else:
-            seq, in_len = generate_sample(model, input_ids, temperature=args.temperature,
-                                          top_k=args.top_k, max_new_tokens=args.max_new,
-                                          device=device, model_type=args.model)
-
-        lower = decode_output(seq, id2char, skip_first_n=in_len)
         print(f"下句: {lower}")
 
 

@@ -237,11 +237,94 @@ def save_processed_data(pairs_path, output_dir, char2id,
     print("All processed data saved.")
 
 
+def save_pretrained_processed_data(pairs_path, output_dir, max_len=64,
+                                    train_ratio=0.8, val_ratio=0.1, seed=42):
+    """Pre-tokenize pairs using uer/gpt2-chinese-poem tokenizer and save as .pt.
+
+    Format: "[CLS] 上 句 字 [SEP] 下 句 字"
+
+    Labels mask out the prefix (up to and including [SEP]) so the model
+    only learns to predict the lower verse.
+    """
+    from models.pretrained import PretrainedPoetryModel
+    from utils.tokenizer import load_pairs
+
+    pairs = load_pairs(pairs_path)
+    print(f"Loaded {len(pairs)} pairs")
+
+    # Load pretrained tokenizer only (no model needed for preprocessing)
+    tokenizer = PretrainedPoetryModel.from_pretrained().tokenizer
+
+    random.seed(seed)
+    random.shuffle(pairs)
+
+    total = len(pairs)
+    train_end = int(total * train_ratio)
+    val_end = train_end + int(total * val_ratio)
+
+    splits = {
+        "train": pairs[:train_end],
+        "valid": pairs[train_end:val_end],
+        "test": pairs[val_end:],
+    }
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    for split_name, split_pairs in splits.items():
+        data = []
+        for upper, lower in split_pairs:
+            # Build prefix: "[CLS] u p p e r [SEP]"
+            upper_spaced = " ".join(list(upper))
+            prefix_text = f"[CLS] {upper_spaced} [SEP]"
+
+            # Build full text: prefix + " l o w e r"
+            lower_spaced = " ".join(list(lower))
+            full_text = f"{prefix_text} {lower_spaced}"
+
+            # Tokenize full sequence with padding/truncation
+            encoded = tokenizer(
+                full_text,
+                max_length=max_len,
+                padding="max_length",
+                truncation=True,
+                add_special_tokens=False,
+                return_tensors="pt",
+            )
+
+            # Tokenize prefix alone (no padding) to get exact prefix length
+            prefix_enc = tokenizer(
+                prefix_text,
+                add_special_tokens=False,
+            )
+
+            input_ids = encoded["input_ids"].squeeze(0)       # (max_len,)
+            attention_mask = encoded["attention_mask"].squeeze(0)
+            labels = input_ids.clone()
+
+            # Mask prefix positions (including [CLS], upper, [SEP])
+            prefix_len = len(prefix_enc["input_ids"])
+            labels[:prefix_len] = -100
+
+            data.append({
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "labels": labels,
+            })
+
+        save_path = os.path.join(output_dir, f"{split_name}_pretrained.pt")
+        torch.save(data, save_path)
+        print(f"Saved {save_path} ({len(data)} samples)")
+
+    print("All pretrained processed data saved.")
+
+
 if __name__ == "__main__":
     import argparse
     from utils.tokenizer import load_vocab, load_pairs, load_and_pair_data
 
     parser = argparse.ArgumentParser(description="Preprocess and save dataset")
+    parser.add_argument("--mode", choices=["custom", "pretrained"], default="custom",
+                        help="custom=build vocab+preproc (default), pretrained=pretokenize for method-3")
     parser.add_argument("--pairs-path", default="data/processed/all_pairs.json")
     parser.add_argument("--vocab-path", default="data/vocab.json")
     parser.add_argument("--output-dir", default="data/processed")
@@ -249,21 +332,32 @@ if __name__ == "__main__":
     parser.add_argument("--val-ratio", type=float, default=0.1)
     parser.add_argument("--max-len-decoder", type=int, default=32)
     parser.add_argument("--max-len-encdec", type=int, default=32)
+    parser.add_argument("--max-len-pretrained", type=int, default=64)
     parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
 
-    print(f"Loading vocabulary from {args.vocab_path}...")
-    char2id, id2char = load_vocab(args.vocab_path)
-    print(f"Vocab size: {len(char2id)}")
+    if args.mode == "pretrained":
+        save_pretrained_processed_data(
+            pairs_path=args.pairs_path,
+            output_dir=args.output_dir,
+            max_len=args.max_len_pretrained,
+            train_ratio=args.train_ratio,
+            val_ratio=args.val_ratio,
+            seed=args.seed,
+        )
+    else:
+        print(f"Loading vocabulary from {args.vocab_path}...")
+        char2id, id2char = load_vocab(args.vocab_path)
+        print(f"Vocab size: {len(char2id)}")
 
-    save_processed_data(
-        pairs_path=args.pairs_path,
-        output_dir=args.output_dir,
-        char2id=char2id,
-        max_len_decoder=args.max_len_decoder,
-        max_len_encdec=args.max_len_encdec,
-        train_ratio=args.train_ratio,
-        val_ratio=args.val_ratio,
-        seed=args.seed,
-    )
+        save_processed_data(
+            pairs_path=args.pairs_path,
+            output_dir=args.output_dir,
+            char2id=char2id,
+            max_len_decoder=args.max_len_decoder,
+            max_len_encdec=args.max_len_encdec,
+            train_ratio=args.train_ratio,
+            val_ratio=args.val_ratio,
+            seed=args.seed,
+        )

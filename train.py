@@ -6,7 +6,7 @@ import argparse
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from torch.optim import Adam
+from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import LambdaLR
 
 try:
@@ -517,6 +517,213 @@ def evaluate_encoder_decoder(model, dataloader, loss_fn, device):
 
 
 # ---------------------------------------------------------------------------
+# Pretrained dataset
+# ---------------------------------------------------------------------------
+
+def collate_pretrained(batch):
+    """Collate function for pre-tokenized pretrained data."""
+    input_ids = torch.stack([item["input_ids"] for item in batch])
+    attention_mask = torch.stack([item["attention_mask"] for item in batch])
+    labels = torch.stack([item["labels"] for item in batch])
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "labels": labels,
+    }
+
+
+@torch.no_grad()
+def evaluate_pretrained(model, dataloader, device):
+    """Compute validation loss for pretrained model."""
+    model.eval()
+    total_loss = 0.0
+    total_tokens = 0
+    for batch in dataloader:
+        with autocast(enabled=(device.type == "cuda" and AMP_AVAILABLE)):
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            labels = batch["labels"].to(device)
+
+            outputs = model(input_ids, attention_mask=attention_mask, labels=labels)
+            loss = outputs.loss.mean()
+
+        n_tokens = (labels != -100).sum().item()
+        total_loss += loss.item() * n_tokens
+        total_tokens += n_tokens
+
+    avg_loss = total_loss / max(total_tokens, 1)
+    perplexity = math.exp(avg_loss) if avg_loss < 100 else float("inf")
+    return avg_loss, perplexity
+
+
+def train_pretrained(args):
+    """Fine-tune the uer/gpt2-chinese-poem pretrained model."""
+    from models.pretrained import PretrainedPoetryModel
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
+
+    # Data
+    print("Loading data...")
+    train_dataset = PreTokenizedDataset(os.path.join(args.data_dir, "train_pretrained.pt"))
+    valid_dataset = PreTokenizedDataset(os.path.join(args.data_dir, "valid_pretrained.pt"))
+
+    train_loader = DataLoader(
+        train_dataset, batch_size=args.batch_size, shuffle=True,
+        num_workers=args.num_workers, pin_memory=True,
+        collate_fn=collate_pretrained,
+    )
+    valid_loader = DataLoader(
+        valid_dataset, batch_size=args.batch_size * 2, shuffle=False,
+        num_workers=args.num_workers, pin_memory=True,
+        collate_fn=collate_pretrained,
+    )
+
+    print(f"  Train samples: {len(train_dataset)}")
+    print(f"  Valid samples: {len(valid_dataset)}")
+
+    # Model
+    print(f"Loading pretrained model: uer/gpt2-chinese-poem...")
+    pretrained = PretrainedPoetryModel.from_pretrained()
+
+    # Multi-GPU: wrap the inner GPT2LMHeadModel
+    if args.multi_gpu:
+        n_gpu = torch.cuda.device_count()
+        if n_gpu > 1:
+            pretrained.model = nn.DataParallel(pretrained.model)
+            print(f"  Using {n_gpu} GPUs (DataParallel on inner model)")
+        elif n_gpu == 1:
+            print("  Only 1 GPU found, --multi-gpu has no effect")
+        else:
+            print("  No GPU found, --multi-gpu has no effect")
+
+    pretrained.to(device)
+
+    n_params = sum(p.numel() for p in pretrained.model.parameters())
+    print(f"Model parameters: {n_params:,}")
+
+    def get_inner_model():
+        """Get the underlying GPT2LMHeadModel (unwrapping DataParallel)."""
+        m = pretrained.model
+        return m.module if hasattr(m, 'module') else m
+
+    # Optimizer: AdamW with weight decay (standard for fine-tuning)
+    no_decay = ["bias", "LayerNorm.weight"]
+    optimizer_grouped_parameters = [
+        {
+            "params": [p for n, p in get_inner_model().named_parameters()
+                       if not any(nd in n for nd in no_decay)],
+            "weight_decay": args.weight_decay,
+        },
+        {
+            "params": [p for n, p in get_inner_model().named_parameters()
+                       if any(nd in n for nd in no_decay)],
+            "weight_decay": 0.0,
+        },
+    ]
+    optimizer = AdamW(optimizer_grouped_parameters, lr=args.lr, eps=args.eps)
+
+    total_steps = len(train_loader) * args.epochs
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer, warmup_steps=args.warmup_steps, total_steps=total_steps
+    )
+
+    # AMP scaler
+    scaler = GradScaler(enabled=(device.type == "cuda" and AMP_AVAILABLE)) if AMP_AVAILABLE else None
+
+    # Training loop
+    os.makedirs(args.checkpoint_dir, exist_ok=True)
+    best_valid_loss = float("inf")
+    start_epoch = 1
+    global_step = 0
+
+    # Resume from checkpoint
+    if args.resume:
+        print(f"Resuming from {args.resume}...")
+        ckpt = torch.load(args.resume, map_location=device, weights_only=False)
+        load_state_into_model(get_inner_model(), ckpt["model_state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        start_epoch = ckpt["epoch"] + 1
+        best_valid_loss = ckpt.get("valid_loss", float("inf"))
+        print(f"  Restored epoch={ckpt['epoch']}, valid_loss={best_valid_loss:.4f}")
+        if "scaler_state_dict" in ckpt and scaler is not None:
+            scaler.load_state_dict(ckpt["scaler_state_dict"])
+
+    for epoch in range(start_epoch, args.epochs + 1):
+        pretrained.train()
+        epoch_loss = 0.0
+        epoch_tokens = 0
+
+        for batch in train_loader:
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            labels = batch["labels"].to(device)
+
+            optimizer.zero_grad()
+
+            with autocast(enabled=(device.type == "cuda" and AMP_AVAILABLE)):
+                outputs = pretrained(input_ids, attention_mask=attention_mask, labels=labels)
+                loss = outputs.loss.mean()  # .mean() 处理 DataParallel 下 loss 变向量的情况
+
+            if scaler is not None:
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(pretrained.parameters(), args.max_norm)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(pretrained.parameters(), args.max_norm)
+                optimizer.step()
+            scheduler.step()
+
+            global_step += 1
+            n_tokens = (labels != -100).sum().item()
+            epoch_loss += loss.item() * n_tokens
+            epoch_tokens += n_tokens
+
+            if global_step % args.log_interval == 0:
+                print(f"  Step {global_step}/{total_steps} | loss: {loss.item():.4f}")
+
+        # Epoch end: evaluate
+        train_ppl = math.exp(epoch_loss / max(epoch_tokens, 1)) if epoch_tokens > 0 else float("inf")
+        valid_loss, valid_ppl = evaluate_pretrained(pretrained, valid_loader, device)
+        lr_now = scheduler.get_last_lr()[0]
+
+        print(f"\nEpoch {epoch}/{args.epochs}")
+        print(f"  Train PPL: {train_ppl:.2f} | Valid loss: {valid_loss:.4f} | Valid PPL: {valid_ppl:.2f} | LR: {lr_now:.2e}")
+
+        # Save checkpoint (best by valid loss)
+        if valid_loss < best_valid_loss:
+            best_valid_loss = valid_loss
+            ckpt_path = os.path.join(args.checkpoint_dir, "pretrained_best.pt")
+            torch.save({
+                "epoch": epoch,
+                "model_state_dict": get_inner_model().state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
+                "valid_loss": valid_loss,
+                "valid_ppl": valid_ppl,
+                "args": vars(args),
+            }, ckpt_path)
+            print(f"  → Best model saved to {ckpt_path}")
+
+        # Save epoch checkpoint
+        ckpt_path = os.path.join(args.checkpoint_dir, f"pretrained_epoch{epoch}.pt")
+        torch.save({
+            "epoch": epoch,
+            "model_state_dict": get_inner_model().state_dict(),
+            "valid_loss": valid_loss,
+        }, ckpt_path)
+
+        print()
+
+    print("Training complete!")
+    print(f"Best valid loss: {best_valid_loss:.4f}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -529,10 +736,10 @@ def main():
     dec.add_argument("--data-dir", default="data/processed")
     dec.add_argument("--vocab-path", default="data/vocab.json")
     dec.add_argument("--checkpoint-dir", default="checkpoints")
-    dec.add_argument("--d-model", type=int, default=256)
+    dec.add_argument("--d-model", type=int, default=512)
     dec.add_argument("--n-heads", type=int, default=8)
-    dec.add_argument("--n-layers", type=int, default=6)
-    dec.add_argument("--d-ff", type=int, default=1024)
+    dec.add_argument("--n-layers", type=int, default=8)
+    dec.add_argument("--d-ff", type=int, default=2048)
     dec.add_argument("--max-len", type=int, default=32)
     dec.add_argument("--dropout", type=float, default=0.1)
     dec.add_argument("--lr", type=float, default=1e-4)
@@ -556,11 +763,11 @@ def main():
     encdec.add_argument("--data-dir", default="data/processed")
     encdec.add_argument("--vocab-path", default="data/vocab.json")
     encdec.add_argument("--checkpoint-dir", default="checkpoints")
-    encdec.add_argument("--d-model", type=int, default=256)
+    encdec.add_argument("--d-model", type=int, default=512)
     encdec.add_argument("--n-heads", type=int, default=8)
-    encdec.add_argument("--enc-n-layers", type=int, default=4)
-    encdec.add_argument("--dec-n-layers", type=int, default=4)
-    encdec.add_argument("--d-ff", type=int, default=1024)
+    encdec.add_argument("--enc-n-layers", type=int, default=6)
+    encdec.add_argument("--dec-n-layers", type=int, default=6)
+    encdec.add_argument("--d-ff", type=int, default=2048)
     encdec.add_argument("--max-len", type=int, default=32)
     encdec.add_argument("--dropout", type=float, default=0.1)
     encdec.add_argument("--lr", type=float, default=1e-4)
@@ -579,12 +786,32 @@ def main():
     encdec.add_argument("--multi-gpu", action="store_true",
                         help="使用所有可用 GPU 训练")
 
+    # Pretrained subcommand
+    pt = subparsers.add_parser("pretrained")
+    pt.add_argument("--data-dir", default="data/processed")
+    pt.add_argument("--checkpoint-dir", default="checkpoints")
+    pt.add_argument("--lr", type=float, default=2e-5)
+    pt.add_argument("--batch-size", type=int, default=64)
+    pt.add_argument("--epochs", type=int, default=10)
+    pt.add_argument("--warmup-steps", type=int, default=500)
+    pt.add_argument("--max-norm", type=float, default=1.0)
+    pt.add_argument("--weight-decay", type=float, default=0.01)
+    pt.add_argument("--eps", type=float, default=1e-8)
+    pt.add_argument("--resume", type=str, default=None,
+                    help="从 checkpoint 恢复训练（如 checkpoints/pretrained_best.pt）")
+    pt.add_argument("--num-workers", type=int, default=0)
+    pt.add_argument("--log-interval", type=int, default=100)
+    pt.add_argument("--multi-gpu", action="store_true",
+                    help="使用所有可用 GPU 训练")
+
     args = parser.parse_args()
 
     if args.model == "decoder-only":
         train_decoder_only(args)
     elif args.model == "encoder-decoder":
         train_encoder_decoder(args)
+    elif args.model == "pretrained":
+        train_pretrained(args)
 
 
 if __name__ == "__main__":
