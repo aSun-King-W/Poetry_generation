@@ -1,9 +1,12 @@
 """Inference: generate lower verse lines from upper lines."""
 
 import os
+import sys
 import json
 import argparse
 import torch
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from models.decoder_only import DecoderOnlyModel
 from models.encoder_decoder import EncoderDecoderModel

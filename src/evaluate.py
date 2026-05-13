@@ -8,11 +8,14 @@ Usage:
 """
 
 import os
+import sys
 import json
 import math
 import argparse
 import torch
 import torch.nn as nn
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from torch.utils.data import DataLoader
 from transformers import BertTokenizer
 
