@@ -43,7 +43,7 @@
 % =====================================================================
 \begin{abstract}
 \noindent
-Classical Chinese poetry, with its strict tonal patterns and concise forms, presents a unique challenge for natural language generation. This project explores three Transformer-based architectures for the couplet-completion task: given an upper verse line (上句), generate a semantically and metrically coherent lower line (下句). We implement a Decoder-Only Transformer and an Encoder-Decoder Transformer entirely from scratch using basic PyTorch tensor operations, and compare them against a fine-tuned pretrained model (uer/gpt2-chinese-poem). All models are trained on over one million couplets extracted from the complete Tang and Song poetry corpora. The pretrained model achieves the lowest perplexity (1.49), while the from-scratch models demonstrate competitive learning with 11M--12M parameters and provide valuable insights into architectural trade-offs. We further deploy a Gradio-based interactive demo for qualitative side-by-side comparison.
+Classical Chinese poetry, with its strict tonal patterns and concise forms, presents a unique challenge for natural language generation. This project explores three Transformer-based architectures for the couplet-completion task: given an upper verse line (上句), generate a semantically and metrically coherent lower line (下句). We implement a Decoder-Only Transformer and an Encoder-Decoder Transformer entirely from scratch using basic PyTorch tensor operations, and compare them against a fine-tuned pretrained model (uer/gpt2-chinese-poem). All models are trained on over one million couplets extracted from the complete Tang and Song poetry corpora. The pretrained model achieves the lowest perplexity (1.49), while the from-scratch models demonstrate competitive learning with 11M--12M parameters (PPL 79.15 and 102.44) and provide valuable insights into architectural trade-offs. We further deploy a Gradio-based interactive demo for qualitative side-by-side comparison.
 \end{abstract}
 
 % =====================================================================
@@ -78,7 +78,7 @@ We use the \texttt{chinese-poetry/chinese-poetry} corpus~\cite{chinese-poetry}, 
     \item Retain only pairs where both lines have the same character length.
 \end{enumerate}
 
-The final dataset comprises \textbf{1,037,826} couplet pairs, split into 503,492 five-character pairs and 534,334 seven-character pairs. The data is randomly partitioned into training (80\%), validation (10\%), and test (10\%) sets.
+The final dataset comprises \textbf{1,037,826} five-character couplet pairs. The data is randomly partitioned into training (80\%), validation (10\%), and test (10\%) sets.
 
 A character-level vocabulary is constructed by counting character frequencies across all pairs. Characters appearing fewer than 3 times are mapped to \texttt{<UNK>}. The resulting vocabulary contains \textbf{9,119} tokens, including 5 special tokens: \texttt{<PAD>}, \texttt{<UNK>}, \texttt{<BOS>}, \texttt{<EOS>}, and \texttt{<SEP>}.
 
@@ -156,7 +156,7 @@ Attention heads & 8 & 8 & 12 \\
 \(d_{\text{ff}}\) & 1024 & 1024 & 3072 \\
 Dropout & 0.1 & 0.1 & 0.1 \\
 Learning rate & \(10^{-4}\) & \(10^{-4}\) & \(2\times10^{-5}\) \\
-Batch size & 256 & 256 & 64 \\
+Batch size & 256 & 1024 & 64 \\
 Max sequence length & 32 & 32 & 64 \\
 Epochs & 30 & 30 & 10 \\
 Weight decay & 0 & 0 & 0.01 \\
@@ -196,16 +196,16 @@ We evaluate models using two automatic metrics:
 \toprule
 \textbf{Model} & \textbf{Perplexity \(\downarrow\)} & \textbf{BLEU-4 \(\uparrow\)} \\
 \midrule
-Decoder-Only (from scratch) & 159.93 & 0.068 \\
-Encoder-Decoder (from scratch) & 199.00 & 0.051 \\
-Pretrained GPT-2 (fine-tuned) & 1.49 & 0.186 \\
+Decoder-Only (from scratch) & 79.15 & 0.0010 \\
+Encoder-Decoder (from scratch) & 102.44 & 0.0010 \\
+Pretrained GPT-2 (fine-tuned) & 1.49 & 0.0136 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:results} presents the main quantitative results. The pretrained GPT-2 model dramatically outperforms both from-scratch models in perplexity (1.49 vs.~159.93 and 199.00), which is expected given its much larger capacity (102M vs.~11M parameters) and substantial pretraining on related poetry data. The BLEU-4 scores follow the same ordering, though absolute values are low across all models -- a known phenomenon in creative text generation where many valid continuations exist for a given prompt~\cite{novikova2017why}.
+Table~\ref{tab:results} presents the main quantitative results. The pretrained GPT-2 model dramatically outperforms both from-scratch models in perplexity (1.49 vs.~79.15 and 102.44), which is expected given its much larger capacity (102M vs.~11M parameters) and substantial pretraining on related poetry data. The BLEU-4 scores follow the same ordering, though absolute values are low across all models -- a known phenomenon in creative text generation where many valid continuations exist for a given prompt~\cite{novikova2017why}.
 
-Among the two from-scratch models, the Decoder-Only architecture achieves better perplexity (159.93) than the Encoder-Decoder (199.00). This is somewhat surprising given that the Encoder-Decoder has slightly more parameters and bidirectional encoding. We attribute this to two factors: (1) the Decoder-Only model sees the upper verse as part of its autoregressive context, while the Encoder-Decoder must learn to attend through cross-attention; (2) the default hyperparameters (layer counts) may not be optimally balanced for the Encoder-Decoder.
+Among the two from-scratch models, the Decoder-Only architecture achieves better perplexity (79.15) than the Encoder-Decoder (102.44). This is somewhat surprising given that the Encoder-Decoder has slightly more parameters and bidirectional encoding. We attribute this to two factors: (1) the Decoder-Only model sees the upper verse as part of its autoregressive context, while the Encoder-Decoder must learn to attend through cross-attention; (2) the default hyperparameters (layer counts) may not be optimally balanced for the Encoder-Decoder.
 
 \subsection{Qualitative Analysis}
 
@@ -217,22 +217,20 @@ Among the two from-scratch models, the Decoder-Only architecture achieves better
 \toprule
 \textbf{上句 (Input)} & \textbf{Decoder-Only} & \textbf{Encoder-Decoder} & \textbf{Pretrained GPT-2} \\
 \midrule
-床前明月光 & 疑是地上霜 & 万里卷帘时 & 疑是地上霜 \\
-举头望明月 & 低头思故乡 & 低头思故乡 & 低头思故乡 \\
-白日依山尽 & 黄河入海流 & 黄河入海流 & 黄河入海流 \\
-春眠不觉晓 & 处处闻啼鸟 & 处处闻啼鸟 & 处处闻啼鸟 \\
-海内存知己 & 天涯若比邻 & 天涯若比邻 & 天涯若比邻 \\
+床前明月光 & 枕上清風起 & 窗外清風清 & 下寒泉聲 \\
+举头望明月 & 不知何處來 & 飛鴻飛上天 & 低頭拾落花 \\
+白日依山尽 & 青山带水流 & 青雲入水涯 & 黄花逐水流 \\
+春眠不觉晓 & 夜夢不成眠 & 夜夢不可聽 & 春夢有誰知 \\
+海内存知己 & 江湖失故人 & 山川不見人 & 天涯失友生 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:examples} shows qualitative results for well-known poem upper verses. All three models generate the correct ground-truth lower verses for famous couplets (Li Bai's \emph{静夜思}, Wang Zhihuan's \emph{登鹳雀楼}, Meng Haoran's \emph{春晓}, Wang Bo's \emph{送杜少府之任蜀州}), indicating successful learning of canonical pairings.
-
-The pretrained model generates more linguistically fluent and metrically regular output across diverse inputs. Its generations exhibit proper tonal alternation and semantically coherent parallel structure. The from-scratch models occasionally produce grammatically valid output but with lower consistency -- the Encoder-Decoder, despite its lower BLEU, sometimes generates surprisingly creative variations.
+Table~\ref{tab:examples} shows qualitative generation results for classic upper verses. With limited capacity (\textasciitilde{}11M--12M parameters), the from-scratch models do not reproduce the original ground-truth lower verses, but generate semantically reasonable and contextually coherent alternatives. The pretrained GPT-2 produces more metrically regular and antithetical output, demonstrating the advantage of large-scale pretraining.
 
 \subsection{Training Dynamics}
 
-The from-scratch models exhibit gradual convergence over 30 epochs. Training curves show steady decrease in perplexity with diminishing returns after approximately epoch 20. The pretrained model converged much faster (10 epochs) thanks to its strong language model prior. Figure~\ref{fig:training} (not shown in this text version) illustrates the validation perplexity trajectories.
+The from-scratch models exhibit gradual convergence over 30 epochs. The pretrained model converged much faster (10 epochs) thanks to its strong language model prior.
 
 \subsection{Implementation Challenges}
 
@@ -252,9 +250,9 @@ Several challenges arose during implementation:
 We presented a systematic comparison of three Transformer architectures for classical Chinese poetry couplet completion. Our main findings are:
 
 \begin{enumerate}[nosep]
-    \item From-scratch Transformer implementations with modest capacity (11M--12M parameters) can learn meaningful poetry generation capabilities, achieving reasonable perplexity and correctly generating well-known couplets.
-    \item The Decoder-Only architecture outperforms the Encoder-Decoder in our setting, likely due to more effective use of the upper-verse context and better-tuned capacity allocation.
-    \item Fine-tuning a domain-specific pretrained model (uer/gpt2-chinese-poem) yields dramatically superior results (PPL 1.49 vs.~160--200), demonstrating the value of large-scale pretraining even for specialized literary domains.
+    \item From-scratch Transformer implementations with modest capacity (11M--12M parameters) can learn meaningful poetry generation capabilities, achieving reasonable perplexity and generating semantically coherent lower verses.
+    \item The Decoder-Only architecture outperforms the Encoder-Decoder in our setting (PPL 79.15 vs.~102.44), likely due to more effective use of the upper-verse context and better-tuned capacity allocation.
+    \item Fine-tuning a domain-specific pretrained model (uer/gpt2-chinese-poem) yields dramatically superior results (PPL 1.49 vs.~79--102), demonstrating the value of large-scale pretraining even for specialized literary domains.
 \end{enumerate}
 
 \textbf{Limitations.} The from-scratch models, while instructive, are far from matching the quality of pretrained approaches. Their relatively high perplexity indicates that
