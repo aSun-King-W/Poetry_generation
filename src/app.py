@@ -44,7 +44,7 @@ from generate import (
     generate_sample,
 )
 
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHECKPOINT_DIR = os.path.join(_BASE_DIR, "checkpoints")
 VOCAB_PATH = os.path.join(_BASE_DIR, "data", "vocab.json")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
