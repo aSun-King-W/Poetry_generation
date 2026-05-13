@@ -1,3 +1,4 @@
+% !TEX program = xelatex
 \documentclass[11pt,a4paper]{article}
 
 % ---- Packages ----
@@ -6,33 +7,61 @@
 \geometry{margin=2.5cm}
 \usepackage{setspace}
 \onehalfspacing
+\usepackage{parskip}            % 段落间以空白分隔，无首行缩进
+
+% ---- Math ----
 \usepackage{amsmath,amssymb}
+
+% ---- Tables ----
 \usepackage{booktabs}
-\usepackage{graphicx}
-\usepackage{hyperref}
-\usepackage{listings}
-\usepackage{xcolor}
+\usepackage{float}
+\usepackage{array}
 \usepackage{caption}
 \usepackage{subcaption}
-\usepackage{float}
-\usepackage{cite}
-\usepackage{enumitem}
+\captionsetup{
+    font=small,
+    labelfont=bf,
+    textfont=it,
+    skip=6pt
+}
 
-% Code listing style
+% ---- Code Listings ----
+\usepackage{listings}
+\usepackage{xcolor}
 \lstset{
-    basicstyle=\small\ttfamily,
+    basicstyle=\ttfamily\small,
+    columns=flexible,
     backgroundcolor=\color{gray!10},
     frame=single,
     breaklines=true,
     postbreak=\mbox{$\hookrightarrow$ },
+    captionpos=b
 }
 
-\title{\vspace{-1cm}
-    \textbf{基于Transformer架构的古典诗歌生成} \\
-    \large 从零实现的Decoder-Only与Encoder-Decoder \\ 对比预训练GPT-2模型微调
+% ---- Graphics ----
+\usepackage{graphicx}
+
+% ---- References ----
+\usepackage{cite}
+
+% ---- Hyperlinks ----
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue,
 }
-\author{Meteor}
-\date{2026年5月}
+
+% ---- Lists ----
+\usepackage{enumitem}
+
+% ---- Title ----
+\title{基于Transformer架构的古典诗歌生成 \\[0.5\baselineskip]
+    \large 从零实现的Decoder-Only与Encoder-Decoder \\ 对比预训练GPT-2模型微调}
+\author{何阳 \\[2pt]
+    \small\url{https://github.com/aSun-King-W/Poetry_generation}}
+\date{2026年5月10日}
 
 \begin{document}
 
@@ -41,26 +70,41 @@
 
 % =====================================================================
 \begin{abstract}
-\noindent
-古典诗歌具有严格的格律和平仄要求，为自然语言生成带来了独特的挑战。本项目探索三种基于Transformer的架构用于诗歌对句补全任务：给定上句，生成语义和格律上连贯的下句。我们使用基础PyTorch张量运算从零实现了Decoder-Only Transformer和Encoder-Decoder Transformer，并与微调的预训练模型（uer/gpt2-chinese-poem）进行对比。所有模型均在超过一百万对从全唐诗和宋诗语料库中提取的诗歌对句上训练。预训练模型取得了最低的困惑度（1.49），而从零实现的模型以11M--12M参数展示了有竞争力的学习能力（PPL 79.15和102.44），为架构权衡提供了有价值的见解。我们还部署了基于Gradio的交互式演示用于定性对比。
+古典诗歌具有严格的格律和平仄要求，为自然语言生成带来了独特的挑战。
+本项目探索三种基于Transformer的架构用于诗歌对句补全任务：给定上句，生成语义和格律上连贯的下句。
+我们使用基础PyTorch张量运算从零实现了Decoder-Only Transformer和Encoder-Decoder Transformer，并与微调的预训练模型（\texttt{uer/gpt2-chinese-poem}）进行对比。
+所有模型均在超过一百万对从全唐诗和宋诗语料库中提取的诗歌对句上训练。
+预训练模型取得了最低的困惑度（1.49），而从零实现的模型以11M--12M参数展示了有竞争力的学习能力（PPL 79.15和102.44），为架构权衡提供了有价值的见解。
+我们还部署了基于Gradio的交互式演示用于定性对比。
 \end{abstract}
 
 % =====================================================================
 \section{引言}
 \label{sec:intro}
 
-古典诗歌是数千年的文化遗产。五言绝句、七言律诗等形式对字数、平仄交替和对仗结构施加了严格的约束。对句补全任务——给定上句，生成下句——考验模型捕捉语义连贯性和形式诗歌约束的能力。
+古典诗歌是数千年的文化遗产。
+五言绝句、七言律诗等形式对字数、平仄交替和对仗结构施加了严格的约束。
+对句补全任务——给定上句，生成下句——考验模型捕捉语义连贯性和形式诗歌约束的能力。
 
-基于神经网络的诗歌生成方法已从基于RNN的方法~\cite{zhang2017chinese, yi2017generating} 演进到基于Transformer的架构~\cite{vaswani2017attention}。\texttt{uer/gpt2-chinese-poem}模型~\cite{zhao2019uer} 在80万首古典诗歌上预训练，为微调提供了强大的基线。然而，从零实现对于理解架构决策和在资源受限环境中的部署仍然具有重要价值。
+基于神经网络的诗歌生成方法已从基于RNN的方法~\cite{zhang2017chinese, yi2017generating}
+演进到基于Transformer的架构~\cite{vaswani2017attention}。
+\texttt{uer/gpt2-chinese-poem}模型~\cite{zhao2019uer}
+在80万首古典诗歌上预训练，为微调提供了强大的基线。
+然而，从零实现对于理解架构决策和在资源受限环境中的部署仍然具有重要价值。
 
 在本项目中，我们实现了三种不同的方法：
 \begin{enumerate}[nosep]
-    \item \textbf{Decoder-Only Transformer：} 一个因果语言模型，以自回归方式预测完整序列“上句 + [SEP] + 下句”。
-    \item \textbf{Encoder-Decoder Transformer：} 一个序列到序列模型，编码器双向处理上句，解码器通过交叉注意力生成下句。
-    \item \textbf{预训练GPT-2微调：} 在 \texttt{uer/gpt2-chinese-poem} 基础上进行对句补全任务的持续训练。
+    \item \textbf{Decoder-Only Transformer：}
+          一个因果语言模型，以自回归方式预测完整序列“上句 + [SEP] + 下句”。
+    \item \textbf{Encoder-Decoder Transformer：}
+          一个序列到序列模型，编码器双向处理上句，解码器通过交叉注意力生成下句。
+    \item \textbf{预训练GPT-2微调：}
+          在 \texttt{uer/gpt2-chinese-poem} 基础上进行对句补全任务的持续训练。
 \end{enumerate}
 
-方法(1)和(2)的所有Transformer组件均使用基础PyTorch张量运算从零实现，不依赖 \texttt{torch.nn.Transformer} 或 \texttt{torch.nn.MultiheadAttention} 等内置Transformer API。
+方法(1)和(2)的所有Transformer组件均使用基础PyTorch张量运算从零实现，
+不依赖 \texttt{torch.nn.Transformer} 或 \texttt{torch.nn.MultiheadAttention}
+等内置Transformer API。
 
 % =====================================================================
 \section{方法论}
@@ -68,98 +112,143 @@
 
 \subsection{数据集与预处理}
 
-我们使用 \texttt{chinese-poetry/chinese-poetry} 语料库~\cite{chinese-poetry}，包含完整的《全唐诗》和《宋诗》。预处理流程如下：
+我们使用 \texttt{chinese-poetry/chinese-poetry} 语料库~\cite{chinese-poetry}，
+包含完整的《全唐诗》和《宋诗》。预处理流程如下：
 
 \begin{enumerate}[nosep]
     \item 从每首诗的 \texttt{paragraphs} 字段中提取各行。
     \item 筛选恰好5或7个汉字的行（标准诗句长度）。
-    \item 将同一首诗中的相邻行配对：第0--1行为第一对，第2--3行为第二对，以此类推（绝句产生2对，律诗产生4对）。
+    \item 将同一首诗中的相邻行配对：第0--1行为第一对，第2--3行为第二对，
+          以此类推（绝句产生2对，律诗产生4对）。
     \item 仅保留两行长度相同的配对。
 \end{enumerate}
 
-最终数据集包含 \textbf{1,037,826} 对五言对句。数据随机划分为训练集（80\%）、验证集（10\%）和测试集（10\%）。
+最终数据集包含 \textbf{1,037,826} 对五言对句。
+数据随机划分为训练集（80\%）、验证集（10\%）和测试集（10\%）。
 
-构建字符级词表，统计所有对中字符频率，出现少于3次的字符映射为 \texttt{<UNK>}。最终词表包含 \textbf{9,119} 个token，包括5个特殊token：\texttt{<PAD>}、\texttt{<UNK>}、\texttt{<BOS>}、\texttt{<EOS>} 和 \texttt{<SEP>}。
+构建字符级词表，统计所有对中字符频率，出现少于3次的字符映射为 \texttt{<UNK>}。
+最终词表包含 \textbf{9,119} 个token，包括5个特殊token：
+\texttt{<PAD>}、\texttt{<UNK>}、\texttt{<BOS>}、\texttt{<EOS>} 和 \texttt{<SEP>}。
 
 \subsection{各架构的数据格式}
 
 每种模型架构需要不同的输入-目标格式：
 
 \begin{itemize}[nosep]
-    \item \textbf{Decoder-Only：} 输入序列为“上句 + SEP + 下句 + EOS”。训练时模型在因果注意力掩码下预测右移一位的完整序列。SEP token标记输入和目标的边界。
-    \item \textbf{Encoder-Decoder：} 编码器接收上句。解码器接收“BOS + 下句”作为输入，训练目标是预测“下句 + EOS”。每个解码器块中的交叉注意力关注编码器的输出。
-    \item \textbf{预训练模型：} \texttt{BertTokenizer}（\texttt{uer/gpt2-chinese-poem} 需要）要求汉字之间加空格。输入格式为“[CLS] 上 句 [SEP] 下 句”。标签屏蔽前缀部分（包括[SEP]之前），使模型只学习预测下句。
+    \item \textbf{Decoder-Only：}
+          输入序列为“上句 + SEP + 下句 + EOS”。
+          训练时模型在因果注意力掩码下预测右移一位的完整序列。
+          SEP token标记输入和目标的边界。
+    \item \textbf{Encoder-Decoder：}
+          编码器接收上句。
+          解码器接收“BOS + 下句”作为输入，训练目标是预测“下句 + EOS”。
+          每个解码器块中的交叉注意力关注编码器的输出。
+    \item \textbf{预训练模型：}
+          \texttt{BertTokenizer}（\texttt{uer/gpt2-chinese-poem} 需要）要求汉字之间加空格。
+          输入格式为“[CLS] 上 句 [SEP] 下 句”。
+          标签屏蔽前缀部分（包括[SEP]之前），使模型只学习预测下句。
 \end{itemize}
 
 \subsection{从零实现的Transformer组件}
 \label{sec:components}
 
-所有核心Transformer组件在 \texttt{models/transformer.py} 中实现，仅使用 \texttt{torch.Tensor} 运算、\texttt{nn.Linear}、\texttt{nn.Embedding}、\texttt{nn.Dropout} 和 \texttt{F.gelu}。关键组件包括：
+所有核心Transformer组件在 \texttt{models/transformer.py} 中实现，
+仅使用 \texttt{torch.Tensor} 运算、\texttt{nn.Linear}、\texttt{nn.Embedding}、
+\texttt{nn.Dropout} 和 \texttt{F.gelu}。关键组件包括：
 
-\paragraph{缩放点积多头注意力。}
+\subsubsection*{缩放点积多头注意力}
 给定查询 \(Q\)、键 \(K\) 和值 \(V\)：
 \[
-\text{Attention}(Q,K,V) = \text{softmax}\!\left(\frac{QK^{\mathsf{T}}}{\sqrt{d_k}}\right)V
+\text{Attention}(Q,K,V) =
+    \text{softmax}\!\left(\frac{QK^{\mathsf{T}}}{\sqrt{d_k}}\right)V
 \]
-通过可学习的线性层投影 \(Q\)、\(K\)、\(V\)，分为 \(n_{\text{heads}}=8\) 个头，每头维度 \(d_k = d_{\text{model}} / n_{\text{heads}}\)，独立计算注意力分数，拼接输出后通过最终投影 \(W_O\)。因果掩码实现为下三角二元掩码；填充掩码通过逐元素乘法组合。
+通过可学习的线性层投影 \(Q\)、\(K\)、\(V\)，分为 \(n_{\text{heads}}=8\) 个头，
+每头维度 \(d_k = d_{\text{model}} / n_{\text{heads}}\)，独立计算注意力分数，
+拼接输出后通过最终投影 \(W_O\)。
+因果掩码实现为下三角二元掩码；填充掩码通过逐元素乘法组合。
 
-\paragraph{正弦位置编码。}
+\subsubsection*{正弦位置编码}
 通过固定的正弦编码注入位置信息：
 \[
 \begin{aligned}
-PE(pos, 2i) &= \sin(pos / 10000^{2i/d_{\text{model}}}) \\
+PE(pos, 2i)   &= \sin(pos / 10000^{2i/d_{\text{model}}}) \\
 PE(pos, 2i+1) &= \cos(pos / 10000^{2i/d_{\text{model}}})
 \end{aligned}
 \]
 编码支持最长256的序列，且不包含可学习参数。
 
-\paragraph{前馈网络。}
-每个位置通过两层网络处理：\(d_{\text{model}} \to d_{\text{ff}} \to d_{\text{model}}\)，使用GELU激活和Dropout。
+\subsubsection*{前馈网络}
+每个位置通过两层网络处理：
+\(d_{\text{model}} \to d_{\text{ff}} \to d_{\text{model}}\)，
+使用GELU激活和Dropout。
 
-\paragraph{Pre-Norm残差架构。}
-每个子层（自注意力、交叉注意力、前馈网络）采用Pre-Norm设计：LayerNorm在子层\emph{之前}应用，之后接残差连接和Dropout。这已被证明有助于稳定深层Transformer的训练~\cite{xiong2020layer}。
+\subsubsection*{Pre-Norm残差架构}
+每个子层（自注意力、交叉注意力、前馈网络）采用Pre-Norm设计：
+LayerNorm在子层\emph{之前}应用，之后接残差连接和Dropout。
+这已被证明有助于稳定深层Transformer的训练~\cite{xiong2020layer}。
 
-\paragraph{解码器与编码器块。}
-\texttt{TransformerBlock}（解码器）包含三个子层：带掩码的自注意力、交叉注意力和前馈网络。\texttt{EncoderBlock}（编码器）包含两个子层：双向自注意力和前馈网络。
+\subsubsection*{解码器与编码器块}
+\texttt{TransformerBlock}（解码器）包含三个子层：带掩码的自注意力、交叉注意力和前馈网络。
+\texttt{EncoderBlock}（编码器）包含两个子层：双向自注意力和前馈网络。
 
 \subsection{架构细节}
 \label{sec:architectures}
 
-\paragraph{Decoder-Only Transformer（\texttt{models/decoder\_only.py}）。}
+\subsubsection*{Decoder-Only Transformer（\texttt{models/decoder\_only.py}）}
 \[
-\text{Embedding} \to \text{PE} \to [\text{TransformerBlock}]^{\times N} \to \text{LayerNorm} \to \text{Linear}(d_{\text{model}}, V)
+\text{Embedding} \to \text{PE} \to
+    [\text{TransformerBlock}]^{\times N} \to
+    \text{LayerNorm} \to \text{Linear}(d_{\text{model}}, V)
 \]
-其中 \(V = 9119\) 为词表大小。配置：\(d_{\text{model}}=256\)，\(N=6\)，\(n_{\text{heads}}=8\)，\(d_{\text{ff}}=1024\)，dropout=0.1，\(\text{max\_len}=32\)。总参数量：\textbf{11.0M}。
+其中 \(V = 9119\) 为词表大小。
+配置：\(d_{\text{model}}=256\)，\(N=6\)，\(n_{\text{heads}}=8\)，
+\(d_{\text{ff}}=1024\)，dropout=0.1，\(\text{max\_len}=32\)。
+总参数量：\textbf{11.0M}。
 
-\paragraph{Encoder-Decoder Transformer（\texttt{models/encoder\_decoder.py}）。}
-编码器使用 \(N_{\text{enc}}=4\) 个 \texttt{EncoderBlock}；解码器使用 \(N_{\text{dec}}=4\) 个 \texttt{TransformerBlock}（含交叉注意力）。编码器和解码器共享Embedding和位置编码。配置：\(d_{\text{model}}=256\)，\(N_{\text{enc}}=4\)，\(N_{\text{dec}}=4\)，\(n_{\text{heads}}=8\)，\(d_{\text{ff}}=1024\)，dropout=0.1，\(\text{max\_len}=32\)。总参数量：\textbf{12.1M}。
+\subsubsection*{Encoder-Decoder Transformer（\texttt{models/encoder\_decoder.py}）}
+编码器使用 \(N_{\text{enc}}=4\) 个 \texttt{EncoderBlock}；
+解码器使用 \(N_{\text{dec}}=4\) 个 \texttt{TransformerBlock}（含交叉注意力）。
+编码器和解码器共享Embedding和位置编码。
+配置：\(d_{\text{model}}=256\)，\(N_{\text{enc}}=4\)，\(N_{\text{dec}}=4\)，
+\(n_{\text{heads}}=8\)，\(d_{\text{ff}}=1024\)，dropout=0.1，
+\(\text{max\_len}=32\)。总参数量：\textbf{12.1M}。
 
-\paragraph{预训练GPT-2 Chinese Poem（\texttt{models/pretrained.py}）。}
-加载 \texttt{uer/gpt2-chinese-poem}，一个GPT-2模型，配置为 \(d_{\text{model}}=768\)，12层，12注意力头，\(d_{\text{ff}}=3072\)（约102M参数）。该模型最初在80万首古典诗歌上通过掩码语言建模预训练。我们在对句数据集上对所有参数进行全参数微调。
+\subsubsection*{预训练GPT-2 Chinese Poem（\texttt{models/pretrained.py}）}
+加载 \texttt{uer/gpt2-chinese-poem}，一个GPT-2模型，
+配置为 \(d_{\text{model}}=768\)，12层，12注意力头，\(d_{\text{ff}}=3072\)（约102M参数）。
+该模型最初在80万首古典诗歌上通过掩码语言建模预训练。
+我们在对句数据集上对所有参数进行全参数微调。
 
 \subsection{训练配置}
 
-三个模型均使用Adam优化器训练。从零实现模型使用 \(\beta_1=0.9\)、\(\beta_2=0.999\)、\(\epsilon=10^{-8}\)、学习率 \(10^{-4}\)，2000步预热后余弦衰减至零，梯度裁剪 \(\text{norm}=1.0\)，标签平滑 \(\epsilon=0.1\)。预训练模型使用AdamW，权重衰减0.01，较低学习率 \(2\times10^{-5}\)，500步预热。交叉熵损失忽略填充位置（设为 \(-100\)）。
+三个模型均使用Adam优化器训练。
+从零实现模型使用 \(\beta_1=0.9\)、\(\beta_2=0.999\)、\(\epsilon=10^{-8}\)、
+学习率 \(10^{-4}\)，2000步预热后余弦衰减至零，梯度裁剪 \(\text{norm}=1.0\)，
+标签平滑 \(\epsilon=0.1\)。
+预训练模型使用AdamW，权重衰减0.01，较低学习率 \(2\times10^{-5}\)，500步预热。
+交叉熵损失忽略填充位置（设为 \(-100\)）。
 
 \begin{table}[H]
 \centering
+\small
+\renewcommand{\arraystretch}{1.1}
 \caption{三个模型的超参数对比。}
 \label{tab:hyperparams}
 \begin{tabular}{lcccc}
 \toprule
 \textbf{超参数} & \textbf{Decoder-Only} & \textbf{Encoder-Decoder} & \textbf{预训练} \\
 \midrule
-\(d_{\text{model}}\) & 256 & 256 & 768 \\
-层数 & 6 & 4 + 4 & 12 \\
-注意力头数 & 8 & 8 & 12 \\
-\(d_{\text{ff}}\) & 1024 & 1024 & 3072 \\
-Dropout & 0.1 & 0.1 & 0.1 \\
-学习率 & \(10^{-4}\) & \(10^{-4}\) & \(2\times10^{-5}\) \\
-批大小 & 256 & 1024 & 64 \\
-最大序列长度 & 32 & 32 & 64 \\
-训练轮数 & 30 & 30 & 10 \\
-权重衰减 & 0 & 0 & 0.01 \\
-参数量 & 11.0M & 12.1M & \(\sim\)102M \\
+\(d_{\text{model}}\)    & 256   & 256   & 768 \\
+层数                    & 6     & 4 + 4 & 12 \\
+注意力头数              & 8     & 8     & 12 \\
+\(d_{\text{ff}}\)       & 1024  & 1024  & 3072 \\
+Dropout                 & 0.1   & 0.1   & 0.1 \\
+学习率                  & \(10^{-4}\) & \(10^{-4}\) & \(2\times10^{-5}\) \\
+批大小                  & 256   & 1024  & 64 \\
+最大序列长度            & 32    & 32    & 64 \\
+训练轮数                & 30    & 30    & 10 \\
+权重衰减                & 0     & 0     & 0.01 \\
+参数量                  & 11.0M & 12.1M & \(\sim\)102M \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -168,9 +257,12 @@ Dropout & 0.1 & 0.1 & 0.1 \\
 
 推理时支持三种解码策略：
 \begin{enumerate}[nosep]
-    \item \textbf{贪心解码：} 每步选择概率最高的token。
-    \item \textbf{集束搜索：} 维护 \(k=5\) 条候选路径，每步按累积对数概率选择前 \(k\) 条。
-    \item \textbf{温度采样：} 从由温度 \(t \in [0.1, 2.0]\) 缩放的分布中采样，默认 \(t=0.8\)。
+    \item \textbf{贪心解码：}
+          每步选择概率最高的token。
+    \item \textbf{集束搜索：}
+          维护 \(k=5\) 条候选路径，每步按累积对数概率选择前 \(k\) 条。
+    \item \textbf{温度采样：}
+          从由温度 \(t \in [0.1, 2.0]\) 缩放的分布中采样，默认 \(t=0.8\)。
 \end{enumerate}
 
 % =====================================================================
@@ -181,64 +273,93 @@ Dropout & 0.1 & 0.1 & 0.1 \\
 
 我们使用两种自动评估指标：
 \begin{itemize}[nosep]
-    \item \textbf{困惑度（PPL）：} \( \exp(\mathcal{L}_{\text{test}}) \)，其中 \(\mathcal{L}_{\text{test}}\) 为测试集平均交叉熵损失。困惑度越低表示预测性能越好。
-    \item \textbf{BLEU-4：} 生成下句与参考下句之间的4-gram重合度，使用带加性平滑的语料BLEU方法计算~\cite{papineni2002bleu}。
+    \item \textbf{困惑度（PPL）：}
+          \(\exp(\mathcal{L}_{\text{test}})\)，
+          其中 \(\mathcal{L}_{\text{test}}\) 为测试集平均交叉熵损失。
+          困惑度越低表示预测性能越好。
+    \item \textbf{BLEU-4：}
+          生成下句与参考下句之间的4-gram重合度，
+          使用带加性平滑的语料BLEU方法计算~\cite{papineni2002bleu}。
 \end{itemize}
 
 \subsection{结果}
 
 \begin{table}[H]
 \centering
+\small
+\renewcommand{\arraystretch}{1.1}
 \caption{测试集评估结果。困惑度在完整测试集上计算；BLEU-4在500个样本子集上使用贪心解码计算。}
 \label{tab:results}
 \begin{tabular}{lcc}
 \toprule
-\textbf{模型} & \textbf{困惑度 \(\downarrow\)} & \textbf{BLEU-4 \(\uparrow\)} \\
+\textbf{模型}                          & \textbf{困惑度 \(\downarrow\)} & \textbf{BLEU-4 \(\uparrow\)} \\
 \midrule
-Decoder-Only（从零实现） & 79.15 & 0.0010 \\
-Encoder-Decoder（从零实现） & 102.44 & 0.0010 \\
-预训练GPT-2（微调） & 1.49 & 0.0136 \\
+Decoder-Only（从零实现）               & 79.15   & 0.0010 \\
+Encoder-Decoder（从零实现）            & 102.44  & 0.0010 \\
+预训练GPT-2（微调）                    & 1.49    & 0.0136 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-表~\ref{tab:results} 展示了主要定量结果。预训练GPT-2模型在困惑度上显著优于两个从零实现模型（1.49 对比 79.15 和 102.44），这符合预期——其容量更大（102M vs. 11M参数）且在相关诗歌数据上进行了大量预训练。BLEU-4分数遵循相同的排序，但所有模型的绝对值都较低——这是创造性文本生成中的已知现象，因为给定提示存在许多有效的续写方式~\cite{novikova2017why}。
+表~\ref{tab:results} 展示了主要定量结果。
+预训练GPT-2模型在困惑度上显著优于两个从零实现模型（1.49 对比 79.15 和 102.44），
+这符合预期——其容量更大（102M vs.~11M参数）且在相关诗歌数据上进行了大量预训练。
+BLEU-4分数遵循相同的排序，但所有模型的绝对值都较低——
+这是创造性文本生成中的已知现象，因为给定提示存在许多有效的续写方式~\cite{novikova2017why}。
 
-在两个从零实现模型中，Decoder-Only架构取得了更好的困惑度（79.15 vs. 102.44）。这有些出乎意料，因为Encoder-Decoder参数量略多且具有双向编码能力。我们将此归因于两个因素：(1) Decoder-Only模型将上句作为自回归上下文的一部分，而Encoder-Decoder需要通过交叉注意力来学习关注上句；(2) 默认超参数（层数）可能未针对Encoder-Decoder进行最优平衡。
+在两个从零实现模型中，Decoder-Only架构取得了更好的困惑度（79.15 vs.~102.44）。
+这有些出乎意料，因为Encoder-Decoder参数量略多且具有双向编码能力。
+我们将此归因于两个因素：
+(1) Decoder-Only模型将上句作为自回归上下文的一部分，而Encoder-Decoder需要通过交叉注意力来学习关注上句；
+(2) 默认超参数（层数）可能未针对Encoder-Decoder进行最优平衡。
 
 \subsection{定性分析}
 
 \begin{table}[H]
 \centering
+\small
+\renewcommand{\arraystretch}{1.2}
 \caption{三个模型使用集束搜索（beam=5）的生成示例。}
 \label{tab:examples}
 \begin{tabular}{p{2.5cm}p{3.2cm}p{3.2cm}p{3.2cm}}
 \toprule
 \textbf{上句} & \textbf{Decoder-Only} & \textbf{Encoder-Decoder} & \textbf{预训练GPT-2} \\
 \midrule
-床前明月光 & 枕上清風起 & 窗外清風清 & 下寒泉聲 \\
-举头望明月 & 不知何處來 & 飛鴻飛上天 & 低頭拾落花 \\
-白日依山尽 & 青山带水流 & 青雲入水涯 & 黄花逐水流 \\
-春眠不觉晓 & 夜夢不成眠 & 夜夢不可聽 & 春夢有誰知 \\
-海内存知己 & 江湖失故人 & 山川不見人 & 天涯失友生 \\
+床前明月光      & 枕上清風起    & 窗外清風清    & 下寒泉聲 \\
+举头望明月      & 不知何處來    & 飛鴻飛上天    & 低頭拾落花 \\
+白日依山尽      & 青山带水流    & 青雲入水涯    & 黄花逐水流 \\
+春眠不觉晓      & 夜夢不成眠    & 夜夢不可聽    & 春夢有誰知 \\
+海内存知己      & 江湖失故人    & 山川不見人    & 天涯失友生 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-表~\ref{tab:examples} 展示了各模型在经典上句上的定性生成结果。由于模型参数量有限（11M--12M），从零实现模型无法复现原诗的标准下句，但生成了在语义和意境上具有一定合理性的变体。预训练GPT-2模型则生成了格律更规整、对仗更工整的输出，体现出大规模预训练的优势。
+表~\ref{tab:examples} 展示了各模型在经典上句上的定性生成结果。
+由于模型参数量有限（11M--12M），从零实现模型无法复现原诗的标准下句，
+但生成了在语义和意境上具有一定合理性的变体。
+预训练GPT-2模型则生成了格律更规整、对仗更工整的输出，体现出大规模预训练的优势。
 
 \subsection{训练动态}
 
-从零实现模型在30个训练轮次中逐步收敛。预训练模型因强大的语言模型先验知识收敛更快（10轮）。
+从零实现模型在30个训练轮次中逐步收敛。
+预训练模型因强大的语言模型先验知识收敛更快（10轮）。
 
 \subsection{实现难点}
 
 实现过程中遇到以下挑战：
 \begin{enumerate}[nosep]
-    \item \textbf{填充掩码组合：} Decoder-Only模型中组合因果掩码和填充掩码需要仔细的广播操作（\texttt{causal\_mask * pad\_mask}），确保填充位置获得 \(-\infty\) 注意力分数。
-    \item \textbf{Encoder-Decoder的交叉注意力：} 集束搜索解码时需要将编码器输出广播到每个束，需要使用 \texttt{.repeat()} 进行显式维度扩展。
-    \item \textbf{预训练tokenizer的空格要求：} \texttt{uer/gpt2-chinese-poem} 的 \texttt{BertTokenizer} 要求汉字之间加空格，这对中文文本处理而言非常规操作。
-    \item \textbf{DataParallel检查点兼容性：} 多GPU训练使用DataParallel保存的状态字典带有 \texttt{module.} 前缀，单GPU加载时需要键名重映射。
+    \item \textbf{填充掩码组合：}
+          Decoder-Only模型中组合因果掩码和填充掩码需要仔细的广播操作
+          （\texttt{causal\_mask * pad\_mask}），确保填充位置获得 \(-\infty\) 注意力分数。
+    \item \textbf{Encoder-Decoder的交叉注意力：}
+          集束搜索解码时需要将编码器输出广播到每个束，
+          需要使用 \texttt{.repeat()} 进行显式维度扩展。
+    \item \textbf{预训练tokenizer的空格要求：}
+          \texttt{uer/gpt2-chinese-poem} 的 \texttt{BertTokenizer} 要求汉字之间加空格，
+          这对中文文本处理而言非常规操作。
+    \item \textbf{DataParallel检查点兼容性：}
+          多GPU训练使用DataParallel保存的状态字典带有 \texttt{module.} 前缀，
+          单GPU加载时需要键名重映射。
 \end{enumerate}
 
 % =====================================================================
@@ -248,14 +369,27 @@ Encoder-Decoder（从零实现） & 102.44 & 0.0010 \\
 我们系统比较了三种用于古典诗歌对句补全的Transformer架构。主要发现如下：
 
 \begin{enumerate}[nosep]
-    \item 适度容量的从零实现Transformer（11M--12M参数）能够学习有意义的诗歌生成能力，取得合理的困惑度并生成语义连贯的下句。
-    \item Decoder-Only架构在我们的设置中优于Encoder-Decoder（PPL 79.15 vs. 102.44），可能因为更有效地利用了上句上下文，以及更优的容量分配。
-    \item 微调领域特定的预训练模型（uer/gpt2-chinese-poem）取得了显著优越的结果（PPL 1.49 vs. 79--102），证明了大规模预训练即使在专业文学领域也具有巨大价值。
+    \item 适度容量的从零实现Transformer（11M--12M参数）能够学习有意义的诗歌生成能力，
+          取得合理的困惑度并生成语义连贯的下句。
+    \item Decoder-Only架构在我们的设置中优于Encoder-Decoder（PPL 79.15 vs.~102.44），
+          可能因为更有效地利用了上句上下文，以及更优的容量分配。
+    \item 微调领域特定的预训练模型（\texttt{uer/gpt2-chinese-poem}）取得了显著优越的结果
+          （PPL 1.49 vs.~79--102），证明了大规模预训练即使在专业文学领域也具有巨大价值。
 \end{enumerate}
 
-\textbf{局限性。} 从零实现模型虽然具有教学意义，但质量远不及预训练方法。其较高的困惑度表明：(1) 11M参数可能不足以捕捉中国诗歌形式的全部复杂性；(2) 可学习位置编码或更深层等架构改进可以缩小部分差距。
+\textbf{局限性。}
+从零实现模型虽然具有教学意义，但质量远不及预训练方法。
+其较高的困惑度表明：
+(1) 11M参数可能不足以捕捉中国诗歌形式的全部复杂性；
+(2) 可学习位置编码或更深层等架构改进可以缩小部分差距。
 
-\textbf{未来工作。} 以下方向值得探索：(a) 扩展从零实现模型以匹配预训练模型的容量；(b) 将显式诗歌约束（平仄模式、押韵）纳入损失函数；(c) 探索基于适配器的参数高效微调；(d) 应用基于人类反馈的强化学习以提升生成质量；(e) 将任务从单对句扩展到完整诗歌生成。
+\textbf{未来工作。}
+以下方向值得探索：
+(a) 扩展从零实现模型以匹配预训练模型的容量；
+(b) 将显式诗歌约束（平仄模式、押韵）纳入损失函数；
+(c) 探索基于适配器的参数高效微调；
+(d) 应用基于人类反馈的强化学习以提升生成质量；
+(e) 将任务从单对句扩展到完整诗歌生成。
 
 \begin{thebibliography}{10}
 

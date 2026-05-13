@@ -1,39 +1,82 @@
+% !TEX program = xelatex
 \documentclass[11pt,a4paper]{article}
 
-% ---- Packages ----
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
+% ---- Layout and Typography ----
 \usepackage{geometry}
 \geometry{margin=2.5cm}
 \usepackage{setspace}
 \onehalfspacing
+\usepackage{parskip}            % 段落间以空行分隔，无缩进
+
+% ---- Fonts (XeLaTeX) ----
+\usepackage{fontspec}
+\usepackage{xeCJK}
+% 按需设置你的中英文字体
+% \setmainfont{Times New Roman}
+% \setCJKmainfont{SimSun}
+
+% ---- Micro-typography ----
+\usepackage{microtype}
+
+% ---- Math ----
 \usepackage{amsmath,amssymb}
+
+% ---- Tables ----
 \usepackage{booktabs}
-\usepackage{graphicx}
-\usepackage{hyperref}
-\usepackage{listings}
-\usepackage{xcolor}
+\usepackage{float}
+\usepackage{array}          % 扩展表格列格式
 \usepackage{caption}
 \usepackage{subcaption}
-\usepackage{float}
-\usepackage{cite}
-\usepackage{enumitem}
+\captionsetup{
+    font=small,
+    labelfont=bf,
+    textfont=it,
+    skip=6pt
+}
 
-% Code listing style
+% ---- Code Listings ----
+\usepackage{listings}
+\usepackage{xcolor}
 \lstset{
-    basicstyle=\small\ttfamily,
+    basicstyle=\ttfamily\small,
+    columns=flexible,
     backgroundcolor=\color{gray!10},
     frame=single,
     breaklines=true,
     postbreak=\mbox{$\hookrightarrow$ },
+    captionpos=b
 }
 
-\title{\vspace{-1cm}
-    \textbf{Classical Chinese Poetry Generation \\ with Transformer Architectures} \\
-    \large From-Scratch Decoder-Only \& Encoder-Decoder vs.\\ Fine-Tuned GPT-2 Chinese Poem
+% ---- Lists ----
+\usepackage{enumitem}
+
+% ---- Graphics ----
+\usepackage{graphicx}
+
+% ---- References ----
+\usepackage{cite}
+
+% ---- Hyperlinks ----
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue,
 }
-\author{Meteor}
-\date{May 2026}
+
+% ---- Title Area ----
+\usepackage{titling}
+\setlength{\droptitle}{-2em}   % 向上微调标题，避免开头太靠下
+
+% ---- Title ----
+\title{Classical Chinese Poetry Generation \\ with Transformer Architectures
+    \\[0.5\baselineskip]
+    \large From-Scratch Decoder-Only \& Encoder-Decoder vs.\
+    Fine-Tuned GPT-2 Chinese Poem}
+\author{He Yang \\[2pt] 
+    \small\url{https://github.com/aSun-King-W/Poetry_generation}}
+\date{May 10, 2026}
 
 \begin{document}
 
@@ -42,26 +85,62 @@
 
 % =====================================================================
 \begin{abstract}
-\noindent
-Classical Chinese poetry, with its strict tonal patterns and concise forms, presents a unique challenge for natural language generation. This project explores three Transformer-based architectures for the couplet-completion task: given an upper verse line (上句), generate a semantically and metrically coherent lower line (下句). We implement a Decoder-Only Transformer and an Encoder-Decoder Transformer entirely from scratch using basic PyTorch tensor operations, and compare them against a fine-tuned pretrained model (uer/gpt2-chinese-poem). All models are trained on over one million couplets extracted from the complete Tang and Song poetry corpora. The pretrained model achieves the lowest perplexity (1.49), while the from-scratch models demonstrate competitive learning with 11M--12M parameters (PPL 79.15 and 102.44) and provide valuable insights into architectural trade-offs. We further deploy a Gradio-based interactive demo for qualitative side-by-side comparison.
+Classical Chinese poetry, with its strict tonal patterns and concise forms,
+presents a unique challenge for natural language generation.
+This project explores three Transformer-based architectures for the
+couplet-completion task: given an upper verse line (上句), generate a
+semantically and metrically coherent lower line (下句).
+We implement a Decoder-Only Transformer and an Encoder-Decoder Transformer
+entirely from scratch using basic PyTorch tensor operations, and compare them
+against a fine-tuned pretrained model (\texttt{uer/gpt2-chinese-poem}).
+All models are trained on over one million couplets extracted from the complete
+Tang and Song poetry corpora.
+The pretrained model achieves the lowest perplexity (1.49), while the
+from-scratch models demonstrate competitive learning with 11M--12M parameters
+(PPL 79.15 and 102.44) and provide valuable insights into architectural
+trade-offs.
+We further deploy a Gradio-based interactive demo for qualitative side-by-side
+comparison.
 \end{abstract}
 
 % =====================================================================
 \section{Introduction}
 \label{sec:intro}
 
-Classical Chinese poetry (古典诗歌) is a cultural heritage spanning thousands of years. Forms such as \emph{五言绝句} (five-character quatrain) and \emph{七言律诗} (seven-character regulated verse) impose strict constraints on character count, tonal alternation, and parallel couplet structure. The couplet-completion task -- given the first line of a couplet, generate the second -- tests a model's ability to capture both semantic coherence and formal poetic constraints.
+Classical Chinese poetry (古典诗歌) is a cultural heritage spanning thousands of
+years. Forms such as \emph{five-character quatrain} (五言绝句) and
+\emph{seven-character regulated verse} (七言律诗) impose strict constraints on
+character count, tonal alternation, and parallel couplet structure.
+The couplet-completion task --- given the first line of a couplet, generate the
+second --- tests a model's ability to capture both semantic coherence and formal
+poetic constraints.
 
-Neural approaches to poetry generation have evolved from RNN-based methods~\cite{zhang2017chinese, yi2017generating} to Transformer-based architectures~\cite{vaswani2017attention}. The release of the \texttt{uer/gpt2-chinese-poem} model~\cite{zhao2019uer}, pretrained on 800K classical Chinese poems, provides a strong baseline for fine-tuning. However, from-scratch implementations remain valuable for understanding architectural decisions and for deployment in resource-constrained environments.
+Neural approaches to poetry generation have evolved from RNN-based
+methods~\cite{zhang2017chinese, yi2017generating} to Transformer-based
+architectures~\cite{vaswani2017attention}.
+The release of the \texttt{uer/gpt2-chinese-poem} model~\cite{zhao2019uer},
+pretrained on 800K classical Chinese poems, provides a strong baseline for
+fine-tuning.
+However, from-scratch implementations remain valuable for understanding
+architectural decisions and for deployment in resource-constrained environments.
 
 In this project, we implement three distinct approaches:
 \begin{enumerate}[nosep]
-    \item \textbf{Decoder-Only Transformer:} A causal language model trained to predict the full sequence ``upper verse + [SEP] + lower verse'' autoregressively.
-    \item \textbf{Encoder-Decoder Transformer:} A sequence-to-sequence model where an encoder processes the upper verse bidirectionally and a decoder generates the lower verse with cross-attention.
-    \item \textbf{Pretrained GPT-2 Fine-Tuning:} The \texttt{uer/gpt2-chinese-poem} model, adapted to the couplet-completion task via continued training.
+    \item \textbf{Decoder-Only Transformer:} A causal language model trained
+          to predict the full sequence ``upper verse + [SEP] + lower verse''
+          autoregressively.
+    \item \textbf{Encoder-Decoder Transformer:} A sequence-to-sequence model
+          where an encoder processes the upper verse bidirectionally and a
+          decoder generates the lower verse with cross-attention.
+    \item \textbf{Pretrained GPT-2 Fine-Tuning:}
+          The \texttt{uer/gpt2-chinese-poem} model, adapted to the
+          couplet-completion task via continued training.
 \end{enumerate}
 
-All Transformer components for methods (1) and (2) are implemented from scratch using only basic PyTorch tensor operations, without relying on built-in Transformer APIs such as \texttt{torch.nn.Transformer} or \texttt{torch.nn.MultiheadAttention}.
+All Transformer components for methods (1) and (2) are implemented from
+scratch using only basic PyTorch tensor operations, without relying on
+built-in Transformer APIs such as \texttt{torch.nn.Transformer} or
+\texttt{torch.nn.MultiheadAttention}.
 
 % =====================================================================
 \section{Methodology}
@@ -69,98 +148,175 @@ All Transformer components for methods (1) and (2) are implemented from scratch 
 
 \subsection{Dataset and Preprocessing}
 
-We use the \texttt{chinese-poetry/chinese-poetry} corpus~\cite{chinese-poetry}, which contains the complete \emph{Quan Tang Shi} (全唐诗, Complete Tang Poems) and \emph{Song Shi} (宋诗, Song Poems). The preprocessing pipeline consists of:
+We use the \texttt{chinese-poetry/chinese-poetry}
+corpus~\cite{chinese-poetry}, which contains the complete
+\emph{Quan Tang Shi} (全唐诗, Complete Tang Poems) and
+\emph{Song Shi} (宋诗, Song Poems).
+The preprocessing pipeline consists of:
 
 \begin{enumerate}[nosep]
     \item Extract individual lines from each poem's \texttt{paragraphs} field.
-    \item Filter to lines of exactly 5 or 7 Chinese characters (the standard verse lengths).
-    \item Pair adjacent lines within the same poem: lines 0--1 form the first couplet, lines 2--3 the second, etc. (quatrains yield 2 pairs; regulated verses yield 4).
+    \item Filter to lines of exactly 5 or 7 Chinese characters (the standard
+          verse lengths).
+    \item Pair adjacent lines within the same poem: lines 0--1 form the first
+          couplet, lines 2--3 the second, etc.
+          (quatrains yield 2 pairs; regulated verses yield 4).
     \item Retain only pairs where both lines have the same character length.
 \end{enumerate}
 
-The final dataset comprises \textbf{1,037,826} five-character couplet pairs. The data is randomly partitioned into training (80\%), validation (10\%), and test (10\%) sets.
+The final dataset comprises \textbf{1,037,826} five-character couplet pairs.
+The data is randomly partitioned into training (80\%), validation (10\%), and
+test (10\%) sets.
 
-A character-level vocabulary is constructed by counting character frequencies across all pairs. Characters appearing fewer than 3 times are mapped to \texttt{<UNK>}. The resulting vocabulary contains \textbf{9,119} tokens, including 5 special tokens: \texttt{<PAD>}, \texttt{<UNK>}, \texttt{<BOS>}, \texttt{<EOS>}, and \texttt{<SEP>}.
+A character-level vocabulary is constructed by counting character frequencies
+across all pairs.
+Characters appearing fewer than 3 times are mapped to \texttt{<UNK>}.
+The resulting vocabulary contains \textbf{9,119} tokens, including 5 special
+tokens: \texttt{<PAD>}, \texttt{<UNK>}, \texttt{<BOS>}, \texttt{<EOS>},
+and \texttt{<SEP>}.
 
 \subsection{Data Formats for Each Architecture}
 
 Each model architecture requires a different input--target format:
 
 \begin{itemize}[nosep]
-    \item \textbf{Decoder-Only:} The input sequence is ``upper verse + SEP + lower verse + EOS''. During training, the model predicts the entire sequence shifted right by one position under a causal attention mask. The SEP token signals the boundary between input and target.
-    \item \textbf{Encoder-Decoder:} The encoder receives the upper verse alone. The decoder receives ``BOS + lower verse'' as input and is trained to predict ``lower verse + EOS''. Cross-attention in each decoder block attends to the encoder's output.
-    \item \textbf{Pretrained:} The \texttt{BertTokenizer} (required by \texttt{uer/gpt2-chinese-poem}) expects spaces between Chinese characters. Inputs are formatted as ``[CLS] u p p e r [SEP] l o w e r''. Labels mask out the prefix (up to and including [SEP]) so the model only learns to predict the lower verse.
+    \item \textbf{Decoder-Only:}
+          The input sequence is ``upper verse + SEP + lower verse + EOS''.
+          During training, the model predicts the entire sequence shifted right
+          by one position under a causal attention mask.
+          The SEP token signals the boundary between input and target.
+    \item \textbf{Encoder-Decoder:}
+          The encoder receives the upper verse alone.
+          The decoder receives ``BOS + lower verse'' as input and is trained
+          to predict ``lower verse + EOS''.
+          Cross-attention in each decoder block attends to the encoder's
+          output.
+    \item \textbf{Pretrained:}
+          The \texttt{BertTokenizer} (required by
+          \texttt{uer/gpt2-chinese-poem}) expects spaces between Chinese
+          characters.
+          Inputs are formatted as ``[CLS] u p p e r [SEP] l o w e r''.
+          Labels mask out the prefix (up to and including [SEP]) so the model
+          only learns to predict the lower verse.
 \end{itemize}
 
 \subsection{From-Scratch Transformer Components}
 \label{sec:components}
 
-All core Transformer components are implemented in \texttt{models/transformer.py} using only \texttt{torch.Tensor} operations, \texttt{nn.Linear}, \texttt{nn.Embedding}, \texttt{nn.Dropout}, and \texttt{F.gelu}. The key components are:
+All core Transformer components are implemented in
+\texttt{models/transformer.py} using only \texttt{torch.Tensor} operations,
+\texttt{nn.Linear}, \texttt{nn.Embedding}, \texttt{nn.Dropout}, and
+\texttt{F.gelu}.
+The key components are:
 
-\paragraph{Scaled Dot-Product Multi-Head Attention.}
+\subsubsection*{Scaled Dot-Product Multi-Head Attention}
 Given queries \(Q\), keys \(K\), and values \(V\):
 \[
-\text{Attention}(Q,K,V) = \text{softmax}\!\left(\frac{QK^{\mathsf{T}}}{\sqrt{d_k}}\right)V
+\text{Attention}(Q,K,V) =
+    \text{softmax}\!\left(\frac{QK^{\mathsf{T}}}{\sqrt{d_k}}\right)V
 \]
-We project \(Q\), \(K\), \(V\) through learned linear layers, split into \(n_{\text{heads}}=8\) heads each of dimension \(d_k = d_{\text{model}} / n_{\text{heads}}\), compute attention scores independently per head, concatenate outputs, and apply a final projection \(W_O\). Causal masking (for decoder self-attention) is implemented as a lower-triangular binary mask; padding masks are combined via element-wise multiplication.
+We project \(Q\), \(K\), \(V\) through learned linear layers, split into
+\(n_{\text{heads}}=8\) heads each of dimension
+\(d_k = d_{\text{model}} / n_{\text{heads}}\), compute attention scores
+independently per head, concatenate outputs, and apply a final projection
+\(W_O\).
+Causal masking (for decoder self-attention) is implemented as a
+lower-triangular binary mask; padding masks are combined via element-wise
+multiplication.
 
-\paragraph{Sinusoidal Positional Encoding.}
+\subsubsection*{Sinusoidal Positional Encoding}
 Position information is injected via fixed sinusoidal encodings:
 \[
 \begin{aligned}
-PE(pos, 2i) &= \sin\!\left(pos / 10000^{2i/d_{\text{model}}}\right) \\
+PE(pos, 2i)   &= \sin\!\left(pos / 10000^{2i/d_{\text{model}}}\right) \\
 PE(pos, 2i+1) &= \cos\!\left(pos / 10000^{2i/d_{\text{model}}}\right)
 \end{aligned}
 \]
 The encoding supports sequences up to length 256 and is not learned.
 
-\paragraph{Feed-Forward Network.}
-Each position is processed through a two-layer network: \(d_{\text{model}} \to d_{\text{ff}} \to d_{\text{model}}\) with GELU activation and dropout.
+\subsubsection*{Feed-Forward Network}
+Each position is processed through a two-layer network:
+\(d_{\text{model}} \to d_{\text{ff}} \to d_{\text{model}}\) with GELU
+activation and dropout.
 
-\paragraph{Pre-Norm Residual Architecture.}
-Each sublayer (self-attention, cross-attention, feed-forward) follows a Pre-Norm design: LayerNorm is applied \emph{before} the sublayer, followed by a residual connection and dropout. This has been shown to stabilize training in deep transformers~\cite{xiong2020layer}.
+\subsubsection*{Pre-Norm Residual Architecture}
+Each sublayer (self-attention, cross-attention, feed-forward) follows a
+Pre-Norm design: LayerNorm is applied \emph{before} the sublayer, followed
+by a residual connection and dropout.
+This has been shown to stabilize training in deep
+transformers~\cite{xiong2020layer}.
 
-\paragraph{Decoder and Encoder Blocks.}
-The \texttt{TransformerBlock} (decoder) contains three sublayers: masked self-attention, cross-attention, and feed-forward. The \texttt{EncoderBlock} contains two sublayers: bidirectional self-attention and feed-forward.
+\subsubsection*{Decoder and Encoder Blocks}
+The \texttt{TransformerBlock} (decoder) contains three sublayers:
+masked self-attention, cross-attention, and feed-forward.
+The \texttt{EncoderBlock} contains two sublayers:
+bidirectional self-attention and feed-forward.
 
 \subsection{Architecture Details}
 \label{sec:architectures}
 
-\paragraph{Decoder-Only Transformer (\texttt{models/decoder\_only.py}).}
-\begin{equation}
-\text{Embedding} \to \text{PE} \to [\text{TransformerBlock}]^{\times N} \to \text{LayerNorm} \to \text{Linear}(d_{\text{model}}, V)
-\end{equation}
-where \(V = 9119\) is the vocabulary size. Configuration: \(d_{\text{model}}=256\), \(N=6\), \(n_{\text{heads}}=8\), \(d_{\text{ff}}=1024\), dropout=0.1, \(\text{max\_len}=32\). Total parameters: \textbf{11.0M}.
+\subsubsection*{Decoder-Only Transformer (\texttt{models/decoder\_only.py})}
+\[
+\text{Embedding} \to \text{PE} \to
+    [\text{TransformerBlock}]^{\times N} \to
+    \text{LayerNorm} \to \text{Linear}(d_{\text{model}}, V)
+\]
+where \(V = 9119\) is the vocabulary size.
+Configuration: \(d_{\text{model}}=256\), \(N=6\), \(n_{\text{heads}}=8\),
+\(d_{\text{ff}}=1024\), dropout=0.1, \(\text{max\_len}=32\).
+Total parameters: \textbf{11.0M}.
 
-\paragraph{Encoder-Decoder Transformer (\texttt{models/encoder\_decoder.py}).}
-The encoder uses \(N_{\text{enc}}=4\) \texttt{EncoderBlock}s; the decoder uses \(N_{\text{dec}}=4\) \texttt{TransformerBlock}s with cross-attention attending to encoder outputs. Embeddings and positional encodings are shared between encoder and decoder. Configuration: \(d_{\text{model}}=256\), \(N_{\text{enc}}=4\), \(N_{\text{dec}}=4\), \(n_{\text{heads}}=8\), \(d_{\text{ff}}=1024\), dropout=0.1, \(\text{max\_len}=32\). Total parameters: \textbf{12.1M}.
+\subsubsection*{Encoder-Decoder Transformer (\texttt{models/encoder\_decoder.py})}
+The encoder uses \(N_{\text{enc}}=4\) \texttt{EncoderBlock}s;
+the decoder uses \(N_{\text{dec}}=4\) \texttt{TransformerBlock}s with
+cross-attention attending to encoder outputs.
+Embeddings and positional encodings are shared between encoder and decoder.
+Configuration: \(d_{\text{model}}=256\), \(N_{\text{enc}}=4\),
+\(N_{\text{dec}}=4\), \(n_{\text{heads}}=8\), \(d_{\text{ff}}=1024\),
+dropout=0.1, \(\text{max\_len}=32\).
+Total parameters: \textbf{12.1M}.
 
-\paragraph{Pretrained GPT-2 Chinese Poem (\texttt{models/pretrained.py}).}
-We load \texttt{uer/gpt2-chinese-poem}, a GPT-2 model with \(d_{\text{model}}=768\), 12 layers, 12 attention heads, and \(d_{\text{ff}}=3072\) (approximately 102M parameters). The model was originally pretrained on 800K classical Chinese poems using masked language modeling. We fine-tune all parameters (full fine-tuning, not adapter-based) on our couplet dataset.
+\subsubsection*{Pretrained GPT-2 Chinese Poem (\texttt{models/pretrained.py})}
+We load \texttt{uer/gpt2-chinese-poem}, a GPT-2 model with
+\(d_{\text{model}}=768\), 12 layers, 12 attention heads, and
+\(d_{\text{ff}}=3072\) (approximately 102M parameters).
+The model was originally pretrained on 800K classical Chinese poems using
+masked language modeling.
+We fine-tune all parameters (full fine-tuning, not adapter-based) on our
+couplet dataset.
 
 \subsection{Training Setup}
 
-All three models are trained with the Adam optimizer. The from-scratch models use \(\beta_1=0.9\), \(\beta_2=0.999\), \(\epsilon=10^{-8}\), a learning rate of \(10^{-4}\) with 2,000 warmup steps followed by cosine decay to zero, gradient clipping at \(\text{norm}=1.0\), and label smoothing \(\epsilon=0.1\). The pretrained model uses AdamW with weight decay 0.01, a lower learning rate of \(2\times 10^{-5}\), and 500 warmup steps. Cross-entropy loss ignores padding positions (set to \(-100\)).
+All three models are trained with the Adam optimizer.
+The from-scratch models use \(\beta_1=0.9\), \(\beta_2=0.999\),
+\(\epsilon=10^{-8}\), a learning rate of \(10^{-4}\) with 2,000 warmup steps
+followed by cosine decay to zero, gradient clipping at \(\text{norm}=1.0\),
+and label smoothing \(\epsilon=0.1\).
+The pretrained model uses AdamW with weight decay 0.01, a lower learning rate
+of \(2\times 10^{-5}\), and 500 warmup steps.
+Cross-entropy loss ignores padding positions (set to \(-100\)).
 
 \begin{table}[H]
 \centering
+\small
+\renewcommand{\arraystretch}{1.1}
 \caption{Hyperparameter comparison across the three models.}
 \label{tab:hyperparams}
 \begin{tabular}{lcccc}
 \toprule
 \textbf{Hyperparameter} & \textbf{Dec-Only} & \textbf{Enc-Dec} & \textbf{Pretrained} \\
 \midrule
-\(d_{\text{model}}\) & 256 & 256 & 768 \\
-Layers & 6 & 4 + 4 & 12 \\
-Attention heads & 8 & 8 & 12 \\
-\(d_{\text{ff}}\) & 1024 & 1024 & 3072 \\
-Dropout & 0.1 & 0.1 & 0.1 \\
-Learning rate & \(10^{-4}\) & \(10^{-4}\) & \(2\times10^{-5}\) \\
-Batch size & 256 & 1024 & 64 \\
-Max sequence length & 32 & 32 & 64 \\
-Epochs & 30 & 30 & 10 \\
-Weight decay & 0 & 0 & 0.01 \\
-Parameters & 11.0M & 12.1M & \(\sim\)102M \\
+\(d_{\text{model}}\)    & 256   & 256   & 768 \\
+Layers                  & 6     & 4 + 4 & 12 \\
+Attention heads         & 8     & 8     & 12 \\
+\(d_{\text{ff}}\)       & 1024  & 1024  & 3072 \\
+Dropout                 & 0.1   & 0.1   & 0.1 \\
+Learning rate           & \(10^{-4}\) & \(10^{-4}\) & \(2\times10^{-5}\) \\
+Batch size              & 256   & 1024  & 64 \\
+Max sequence length     & 32    & 32    & 64 \\
+Epochs                  & 30    & 30    & 10 \\
+Weight decay            & 0     & 0     & 0.01 \\
+Parameters              & 11.0M & 12.1M & \(\sim\)102M \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -169,9 +325,13 @@ Parameters & 11.0M & 12.1M & \(\sim\)102M \\
 
 During inference, we support three decoding strategies:
 \begin{enumerate}[nosep]
-    \item \textbf{Greedy decoding:} At each step, select the token with the highest probability.
-    \item \textbf{Beam search:} Maintain \(k=5\) partial hypotheses, selecting the top-\(k\) sequences by cumulative log-probability at each step.
-    \item \textbf{Temperature sampling:} Sample from the token distribution scaled by temperature \(t \in [0.1, 2.0]\), with \(t=0.8\) as default.
+    \item \textbf{Greedy decoding:} At each step, select the token with the
+          highest probability.
+    \item \textbf{Beam search:} Maintain \(k=5\) partial hypotheses, selecting
+          the top-\(k\) sequences by cumulative log-probability at each step.
+    \item \textbf{Temperature sampling:} Sample from the token distribution
+          scaled by temperature \(t \in [0.1, 2.0]\), with \(t=0.8\) as
+          default.
 \end{enumerate}
 
 % =====================================================================
@@ -182,84 +342,159 @@ During inference, we support three decoding strategies:
 
 We evaluate models using two automatic metrics:
 \begin{itemize}[nosep]
-    \item \textbf{Perplexity (PPL):} \( \exp(\mathcal{L}_{\text{test}}) \), where \(\mathcal{L}_{\text{test}}\) is the average cross-entropy loss on the test set. Lower perplexity indicates better predictive performance.
-    \item \textbf{BLEU-4:} The 4-gram overlap between the generated lower verse and the reference lower verse, computed using the corpus BLEU method~\cite{papineni2002bleu} with additive smoothing.
+    \item \textbf{Perplexity (PPL):}
+          \(\exp(\mathcal{L}_{\text{test}})\), where
+          \(\mathcal{L}_{\text{test}}\) is the average cross-entropy loss on
+          the test set.
+          Lower perplexity indicates better predictive performance.
+    \item \textbf{BLEU-4:}
+          The 4-gram overlap between the generated lower verse and the
+          reference lower verse, computed using the corpus BLEU
+          method~\cite{papineni2002bleu} with additive smoothing.
 \end{itemize}
 
 \subsection{Results}
 
 \begin{table}[H]
 \centering
-\caption{Evaluation results on the test set. Perplexity is computed on the full test set; BLEU-4 is computed over a subset of 500 samples using greedy decoding.}
+\small
+\renewcommand{\arraystretch}{1.1}
+\caption{Evaluation results on the test set.
+         Perplexity is computed on the full test set; BLEU-4 is computed
+         over a subset of 500 samples using greedy decoding.}
 \label{tab:results}
 \begin{tabular}{lcc}
 \toprule
-\textbf{Model} & \textbf{Perplexity \(\downarrow\)} & \textbf{BLEU-4 \(\uparrow\)} \\
+\textbf{Model}                          & \textbf{Perplexity \(\downarrow\)} & \textbf{BLEU-4 \(\uparrow\)} \\
 \midrule
-Decoder-Only (from scratch) & 79.15 & 0.0010 \\
-Encoder-Decoder (from scratch) & 102.44 & 0.0010 \\
-Pretrained GPT-2 (fine-tuned) & 1.49 & 0.0136 \\
+Decoder-Only (from scratch)             & 79.15   & 0.0010 \\
+Encoder-Decoder (from scratch)          & 102.44  & 0.0010 \\
+Pretrained GPT-2 (fine-tuned)           & 1.49    & 0.0136 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:results} presents the main quantitative results. The pretrained GPT-2 model dramatically outperforms both from-scratch models in perplexity (1.49 vs.~79.15 and 102.44), which is expected given its much larger capacity (102M vs.~11M parameters) and substantial pretraining on related poetry data. The BLEU-4 scores follow the same ordering, though absolute values are low across all models -- a known phenomenon in creative text generation where many valid continuations exist for a given prompt~\cite{novikova2017why}.
+Table~\ref{tab:results} presents the main quantitative results.
+The pretrained GPT-2 model dramatically outperforms both from-scratch models
+in perplexity (1.49 vs.~79.15 and 102.44), which is expected given its much
+larger capacity (102M vs.~11M parameters) and substantial pretraining on
+related poetry data.
+The BLEU-4 scores follow the same ordering, though absolute values are low
+across all models --- a known phenomenon in creative text generation where
+many valid continuations exist for a given
+prompt~\cite{novikova2017why}.
 
-Among the two from-scratch models, the Decoder-Only architecture achieves better perplexity (79.15) than the Encoder-Decoder (102.44). This is somewhat surprising given that the Encoder-Decoder has slightly more parameters and bidirectional encoding. We attribute this to two factors: (1) the Decoder-Only model sees the upper verse as part of its autoregressive context, while the Encoder-Decoder must learn to attend through cross-attention; (2) the default hyperparameters (layer counts) may not be optimally balanced for the Encoder-Decoder.
+Among the two from-scratch models, the Decoder-Only architecture achieves
+better perplexity (79.15) than the Encoder-Decoder (102.44).
+This is somewhat surprising given that the Encoder-Decoder has slightly more
+parameters and bidirectional encoding.
+We attribute this to two factors:
+(1) the Decoder-Only model sees the upper verse as part of its autoregressive
+context, while the Encoder-Decoder must learn to attend through
+cross-attention;
+(2) the default hyperparameters (layer counts) may not be optimally balanced
+for the Encoder-Decoder.
 
 \subsection{Qualitative Analysis}
 
 \begin{table}[H]
 \centering
-\caption{Generation examples from all three models using beam search (beam=5).}
+\small
+\renewcommand{\arraystretch}{1.2}
+\caption{Generation examples from all three models using beam search
+         (beam=5).}
 \label{tab:examples}
 \begin{tabular}{p{2.5cm}p{3.2cm}p{3.2cm}p{3.2cm}}
 \toprule
-\textbf{上句 (Input)} & \textbf{Decoder-Only} & \textbf{Encoder-Decoder} & \textbf{Pretrained GPT-2} \\
+\textbf{Input (上句)} & \textbf{Decoder-Only} & \textbf{Encoder-Decoder} & \textbf{Pretrained GPT-2} \\
 \midrule
-床前明月光 & 枕上清風起 & 窗外清風清 & 下寒泉聲 \\
-举头望明月 & 不知何處來 & 飛鴻飛上天 & 低頭拾落花 \\
-白日依山尽 & 青山带水流 & 青雲入水涯 & 黄花逐水流 \\
-春眠不觉晓 & 夜夢不成眠 & 夜夢不可聽 & 春夢有誰知 \\
-海内存知己 & 江湖失故人 & 山川不見人 & 天涯失友生 \\
+床前明月光      & 枕上清風起    & 窗外清風清    & 下寒泉聲 \\
+举头望明月      & 不知何處來    & 飛鴻飛上天    & 低頭拾落花 \\
+白日依山尽      & 青山带水流    & 青雲入水涯    & 黄花逐水流 \\
+春眠不觉晓      & 夜夢不成眠    & 夜夢不可聽    & 春夢有誰知 \\
+海内存知己      & 江湖失故人    & 山川不見人    & 天涯失友生 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:examples} shows qualitative generation results for classic upper verses. With limited capacity (\textasciitilde{}11M--12M parameters), the from-scratch models do not reproduce the original ground-truth lower verses, but generate semantically reasonable and contextually coherent alternatives. The pretrained GPT-2 produces more metrically regular and antithetical output, demonstrating the advantage of large-scale pretraining.
+Table~\ref{tab:examples} shows qualitative generation results for classic
+upper verses.
+With limited capacity (\textasciitilde{}11M--12M parameters), the from-scratch
+models do not reproduce the original ground-truth lower verses, but generate
+semantically reasonable and contextually coherent alternatives.
+The pretrained GPT-2 produces more metrically regular and antithetical output,
+demonstrating the advantage of large-scale pretraining.
 
 \subsection{Training Dynamics}
 
-The from-scratch models exhibit gradual convergence over 30 epochs. The pretrained model converged much faster (10 epochs) thanks to its strong language model prior.
+The from-scratch models exhibit gradual convergence over 30 epochs.
+The pretrained model converged much faster (10 epochs) thanks to its strong
+language model prior.
 
 \subsection{Implementation Challenges}
 
 Several challenges arose during implementation:
 
 \begin{enumerate}[nosep]
-    \item \textbf{Padding mask combination:} Combining the causal mask and padding mask in the Decoder-Only model required careful broadcasting (\texttt{causal\_mask * pad\_mask}) to ensure that padding positions receive \(-\infty\) attention scores.
-    \item \textbf{Cross-attention in the Encoder-Decoder:} The encoder output must be broadcast to each beam during beam search decoding, requiring explicit dimension expansion with \texttt{.repeat()}.
-    \item \textbf{Pretrained tokenizer spacing:} The \texttt{BertTokenizer} for \texttt{uer/gpt2-chinese-poem} requires spaces between Chinese characters, which is non-standard for Chinese text processing.
-    \item \textbf{DataParallel checkpoint compatibility:} Models trained with multi-GPU DataParallel save state dicts with a \texttt{module.} prefix; loading on a single GPU requires key remapping.
+    \item \textbf{Padding mask combination:}
+          Combining the causal mask and padding mask in the Decoder-Only model
+          required careful broadcasting (\texttt{causal\_mask * pad\_mask})
+          to ensure that padding positions receive \(-\infty\) attention
+          scores.
+    \item \textbf{Cross-attention in the Encoder-Decoder:}
+          The encoder output must be broadcast to each beam during beam search
+          decoding, requiring explicit dimension expansion with
+          \texttt{.repeat()}.
+    \item \textbf{Pretrained tokenizer spacing:}
+          The \texttt{BertTokenizer} for \texttt{uer/gpt2-chinese-poem}
+          requires spaces between Chinese characters, which is non-standard
+          for Chinese text processing.
+    \item \textbf{DataParallel checkpoint compatibility:}
+          Models trained with multi-GPU DataParallel save state dicts with a
+          \texttt{module.} prefix; loading on a single GPU requires key
+          remapping.
 \end{enumerate}
 
 % =====================================================================
 \section{Conclusion}
 \label{sec:conclusion}
 
-We presented a systematic comparison of three Transformer architectures for classical Chinese poetry couplet completion. Our main findings are:
+We presented a systematic comparison of three Transformer architectures for
+classical Chinese poetry couplet completion.
+Our main findings are:
 
 \begin{enumerate}[nosep]
-    \item From-scratch Transformer implementations with modest capacity (11M--12M parameters) can learn meaningful poetry generation capabilities, achieving reasonable perplexity and generating semantically coherent lower verses.
-    \item The Decoder-Only architecture outperforms the Encoder-Decoder in our setting (PPL 79.15 vs.~102.44), likely due to more effective use of the upper-verse context and better-tuned capacity allocation.
-    \item Fine-tuning a domain-specific pretrained model (uer/gpt2-chinese-poem) yields dramatically superior results (PPL 1.49 vs.~79--102), demonstrating the value of large-scale pretraining even for specialized literary domains.
+    \item From-scratch Transformer implementations with modest capacity
+          (11M--12M parameters) can learn meaningful poetry generation
+          capabilities, achieving reasonable perplexity and generating
+          semantically coherent lower verses.
+    \item The Decoder-Only architecture outperforms the Encoder-Decoder in
+          our setting (PPL 79.15 vs.~102.44), likely due to more effective
+          use of the upper-verse context and better-tuned capacity allocation.
+    \item Fine-tuning a domain-specific pretrained model
+          (uer/gpt2-chinese-poem) yields dramatically superior results
+          (PPL 1.49 vs.~79--102), demonstrating the value of large-scale
+          pretraining even for specialized literary domains.
 \end{enumerate}
 
-\textbf{Limitations.} The from-scratch models, while instructive, are far from matching the quality of pretrained approaches. Their relatively high perplexity indicates that
-(1) 11M parameters may be insufficient for capturing the full complexity of Chinese poetic form, and
-(2) architectural improvements such as learned positional encodings or deeper layers could bridge part of the gap.
+\textbf{Limitations.}
+The from-scratch models, while instructive, are far from matching the quality
+of pretrained approaches.
+Their relatively high perplexity indicates that
+(1) 11M parameters may be insufficient for capturing the full complexity of
+Chinese poetic form, and
+(2) architectural improvements such as learned positional encodings or deeper
+layers could bridge part of the gap.
 
-\textbf{Future work.} Several directions are promising: (a) scaling from-scratch models to match pretrained capacity; (b) incorporating explicit poetic constraints (tone patterns, rhyme) into the loss function; (c) exploring adapter-based fine-tuning for parameter-efficient adaptation; (d) applying reinforcement learning from human feedback to improve generation quality; and (e) extending the task to full poem generation beyond single couplets.
+\textbf{Future work.}
+Several directions are promising:
+(a) scaling from-scratch models to match pretrained capacity;
+(b) incorporating explicit poetic constraints (tone patterns, rhyme) into the
+loss function;
+(c) exploring adapter-based fine-tuning for parameter-efficient adaptation;
+(d) applying reinforcement learning from human feedback to improve generation
+quality;
+(e) extending the task to full poem generation beyond single couplets.
 
 \begin{thebibliography}{10}
 
