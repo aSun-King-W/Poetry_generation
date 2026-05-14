@@ -50,15 +50,15 @@
 
 - 来源：[chinese-poetry/chinese-poetry](https://github.com/chinese-poetry/chinese-poetry)（全唐诗、宋诗）
 - 处理：同一首诗中相邻行配对，筛选五言/七言
-- 统计：**1,037,826 对** (503,492 五言 + 534,334 七言) | 词表 9,119 | 8:1:1 划分
+- 统计：**1,037,826 对**（全部五言）| 词表 9,119 | 8:1:1 划分
 
 ## 实验结果
 
 | Model | PPL ↓ | BLEU-4 ↑ |
 |-------|:-----:|:---------:|
-| Decoder-Only (from scratch) | 159.93 | 0.068 |
-| Encoder-Decoder (from scratch) | 199.00 | 0.051 |
-| Pretrained GPT-2 (fine-tuned) | **1.49** | **0.186** |
+| Decoder-Only (from scratch) | 79.15 | 0.0010 |
+| Encoder-Decoder (from scratch) | 102.44 | 0.0010 |
+| Pretrained GPT-2 (fine-tuned) | **1.49** | **0.0136** |
 
 > 注：诗歌生成中一句上句可以有多种合理的下句，BLEU 只测量与单一参考的 n-gram 重合度，分数偏低属正常现象。
 
